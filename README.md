@@ -17,6 +17,9 @@ https://laundryloop-ruby.vercel.app (Vercel, with a Neon Postgres database).
 - Demo customer and provider accounts are one click away on the sign-in page.
 - The admin account on the live site does **not** use the demo password. Its password is the `ADMIN_PASSWORD`
   environment variable on Vercel (applied on every start, so changing it and redeploying resets the password), and a copy is in `admin-login.local.txt` (git- and deploy-ignored).
+- `PREFILL_ADMIN_LOGIN=1` (set on the live site) fills the admin email and password into the sign-in page and the
+  presenter on every device, and shows an Admin demo button. **Anyone who opens the site can then sign in as admin.**
+  Delete the variable and redeploy to hide it again.
 - Redeploy after changes with `npx vercel deploy --prod`.
 
 ## Run it locally

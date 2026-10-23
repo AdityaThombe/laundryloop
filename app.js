@@ -250,6 +250,10 @@ route('GET', '/api/config', null, () => ({
   slots: SLOTS, statusLabel: STATUS_LABEL, commission: COMMISSION, riderFee: RIDER_FEE, deliveryFee: DELIVERY_FEE,
   freeDeliveryAbove: FREE_DELIVERY_ABOVE, issueTypes: ISSUE_TYPES,
   demo: process.env.DEMO_LOGINS !== '0', demoAdmin: !process.env.ADMIN_PASSWORD,
+  // Opt-in (PREFILL_ADMIN_LOGIN=1): publish the admin login so every device gets it filled in.
+  // Anyone who opens the site can then sign in as admin, so only use it for a demo.
+  adminLogin: process.env.PREFILL_ADMIN_LOGIN === '1'
+    ? { email: 'admin@laundryloop.test', password: process.env.ADMIN_PASSWORD || 'admin123' } : null,
 }));
 
 route('GET', '/api/slots', null, () => ({ pickupDates: pickupDates(), slots: SLOTS, maxTurnaround: MAX_TURNAROUND_DAYS }));

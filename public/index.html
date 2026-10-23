@@ -293,7 +293,13 @@
   }).catch(() => {});
 
   LL.api('/api/config').then((cfg) => {
-    const shown = DEMO.map((d, i) => [d, i]).filter(([d]) => cfg.demo && (d[0] !== 'Admin' || cfg.demoAdmin));
+    // The admin login, when the site is set to publish it (PREFILL_ADMIN_LOGIN).
+    if (cfg.adminLogin) {
+      const admin = DEMO.find((d) => d[0] === 'Admin');
+      admin[1] = cfg.adminLogin.email; admin[2] = cfg.adminLogin.password;
+      if (!loginForm.password.value) { loginForm.email.value = cfg.adminLogin.email; loginForm.password.value = cfg.adminLogin.password; }
+    }
+    const shown = DEMO.map((d, i) => [d, i]).filter(([d]) => cfg.demo && (d[0] !== 'Admin' || cfg.demoAdmin || cfg.adminLogin));
     if (!shown.length) { document.querySelector('.demo').remove(); return; }
     document.getElementById('demo').innerHTML = shown.map(([[label, , , icon, who], i]) =>
       `<button type="button" data-i="${i}"><i class="ti ${icon}"></i><b>${label}</b><span>${who}</span></button>`).join('');

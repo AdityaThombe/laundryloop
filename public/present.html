@@ -405,6 +405,12 @@ async function renderLibrary() {
       <input class="input" name="password" type="password" placeholder="Password" required autocomplete="current-password">
       <button class="btn primary block" type="submit">Sign in</button><p class="err" id="signin-err"></p></form>`;
     $('signin').onsubmit = signIn;
+    // Filled in on every device when the site publishes the admin login (PREFILL_ADMIN_LOGIN).
+    fetch('/api/config').then((r) => r.json()).then((cfg) => {
+      const f = $('signin');
+      if (!cfg.adminLogin || !f || f.password.value) return;
+      f.email.value = cfg.adminLogin.email; f.password.value = cfg.adminLogin.password;
+    }).catch(() => {});
     return;
   }
   $('drop').classList.remove('hidden'); $('note').classList.remove('hidden'); $('decks-h').classList.remove('hidden');
