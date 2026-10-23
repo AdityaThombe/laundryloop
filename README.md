@@ -85,7 +85,7 @@ public/rider.html
 public/admin.html
 public/present.html Hidden slide presenter (see below)
 public/common.js   Shared API client, live updates, formatting, timeline
-public/styles.css  Shared design system (Inter, brand gradient, light and dark themes)
+public/styles.css  Shared styles: paper-and-ink palette, Bricolage Grotesque / Instrument Sans / IBM Plex Mono, light and dark themes
 ```
 
 ## Hidden slide presenter
