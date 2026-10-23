@@ -238,7 +238,12 @@
     };
   });
 
+  // The email last used to sign in on this device is filled in for next time.
+  const LAST_EMAIL = 'll_last_email';
+  try { const last = localStorage.getItem(LAST_EMAIL); if (last && !loginForm.email.value) loginForm.email.value = last; } catch {}
+
   function done(res) {
+    try { localStorage.setItem(LAST_EMAIL, res.user.email); } catch {}
     LL.setToken(res.token, res.user.role);
     location.href = LL.HOME[res.user.role];
   }

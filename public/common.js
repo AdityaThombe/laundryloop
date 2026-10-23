@@ -324,10 +324,70 @@ const LL = (() => {
     return inner ? `<div class="scene" data-s="${status}" aria-hidden="true">${inner}</div>` : '';
   }
 
+  // ---------- drafts ----------
+  // Whatever someone types survives a live re-render of the screen, and a tab reload (Android often
+  // reloads a background tab, e.g. after switching apps to copy a password). Drafts live in
+  // sessionStorage for this tab only; passwords are never kept. A draft is only put back while the
+  // field still shows the value it had when editing began, so saved or changed data always wins.
+  const drafts = (() => {
+    const KEY = 'll_drafts';
+    let store = {};
+    try { store = JSON.parse(sessionStorage.getItem(KEY)) || {}; } catch {}
+    const save = () => { try { sessionStorage.setItem(KEY, JSON.stringify(store)); } catch {} };
+    const FIELDS = 'input, textarea, select';
+    const skip = (el) => !(el.id || el.name) || ['password', 'file', 'hidden', 'submit', 'button'].includes(el.type) || el.dataset.nodraft !== undefined;
+    const isBox = (el) => el.type === 'checkbox' || el.type === 'radio';
+    const base = (el) => (isBox(el) ? el.defaultChecked : el.tagName === 'SELECT' ? [...el.options].find((o) => o.defaultSelected)?.value ?? el.options[0]?.value ?? '' : el.defaultValue);
+    const current = (el) => (isBox(el) ? el.checked : el.value);
+    // Screen + form + field name, with an index when several fields share a name (one per row).
+    function keyOf(el) {
+      if (skip(el)) return null;
+      const id = (el.form?.id || '') + '|' + (el.id || el.name) + (el.type === 'radio' ? '=' + el.value : '');
+      const same = [...document.querySelectorAll(FIELDS)].filter((f) => !skip(f) && (f.form?.id || '') + '|' + (f.id || f.name) + (f.type === 'radio' ? '=' + f.value : '') === id);
+      return location.pathname + location.hash + '|' + id + '#' + same.indexOf(el);
+    }
+    function remember(e) {
+      const el = e.target;
+      if (!el.matches?.(FIELDS)) return;
+      const k = keyOf(el);
+      if (!k) return;
+      if (el.type === 'radio') { // one draft per group: forget the other options
+        document.querySelectorAll(`input[type=radio][name="${CSS.escape(el.name)}"]`).forEach((r) => { const rk = keyOf(r); if (rk) delete store[rk]; });
+      }
+      const b = store[k]?.b ?? base(el);
+      if (current(el) === b) delete store[k]; else store[k] = { v: current(el), b };
+      save();
+    }
+    document.addEventListener('input', remember, true);
+    document.addEventListener('change', remember, true);
+    // A submitted form is done with: forget its drafts.
+    document.addEventListener('submit', (e) => {
+      e.target.querySelectorAll(FIELDS).forEach((el) => { const k = keyOf(el); if (k) delete store[k]; });
+      save();
+    }, true);
+    function restore(root = document) {
+      root.querySelectorAll(FIELDS).forEach((el) => {
+        const k = keyOf(el);
+        const d = k && store[k];
+        if (!d) return;
+        if (base(el) !== d.b) { delete store[k]; return; } // the data underneath changed
+        if (current(el) === d.v) return;
+        if (isBox(el)) el.checked = d.v; else el.value = d.v;
+        // Let the page's own handlers see it, as if it had been typed.
+        el.dispatchEvent(new Event(isBox(el) || el.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true }));
+      });
+      save();
+    }
+    const startup = () => restore(document);
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', startup); else startup();
+    return { restore };
+  })();
+
   // ---------- motion ----------
   // Views are re-rendered wholesale (on navigation and on every live update), so motion is driven
-  // from here by watching the view: content staggers in only after navigation, items whose data
-  // changed flash, new items slide in, and numbers roll to their new value.
+  // from here by watching the view: in the phone apps content fades in after navigation; items whose
+  // data changed flash, new items slide in, and numbers roll to their new value. Nothing animates
+  // just because a screen was opened again (the admin console shows its numbers as they are).
   const motion = (() => {
     const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
     let freshUntil = Date.now() + 4000; // first load
@@ -358,8 +418,9 @@ const LL = (() => {
     }
 
     function scan(root) {
+      drafts.restore(root);
       const fresh = Date.now() < freshUntil;
-      if (fresh && !reduce) {
+      if (fresh && !reduce && root.id === 'view') {
         // Stagger the top-level blocks of the screen in.
         [...root.children].forEach((c, i) => { c.style.setProperty('--i', Math.min(i, 12)); c.classList.add('stagger-in'); });
         root.classList.add('fresh');
@@ -381,11 +442,11 @@ const LL = (() => {
         const key = numKey(el, i);
         const val = Number((el.textContent.match(/[\d,]+/) || [''])[0].replace(/,/g, ''));
         if (!Number.isFinite(val) || !/\d/.test(el.textContent)) return;
-        const prev = nums.has(key) ? nums.get(key) : fresh ? 0 : val;
+        const prev = nums.has(key) ? nums.get(key) : val;
         nums.set(key, val);
-        if (prev !== val && !reduce) {
+        if (prev !== val && !reduce && !fresh) {
           rollNumber(el, prev, val);
-          if (nums.size && !fresh) el.classList.add('bump');
+          el.classList.add('bump');
         }
       });
     }

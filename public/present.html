@@ -401,7 +401,7 @@ async function renderLibrary() {
     $('drop').classList.add('hidden'); $('note').classList.add('hidden'); $('decks-h').classList.add('hidden');
     $('decks').innerHTML = `<form class="signin" id="signin">
       <b>Sign in as admin</b><p>Decks are shared across your devices, so the presenter needs the admin account.</p>
-      <input class="input" name="email" type="email" placeholder="Admin email" required autocomplete="username">
+      <input class="input" name="email" type="email" placeholder="Admin email" required autocomplete="username" value="${esc(lastEmail())}">
       <input class="input" name="password" type="password" placeholder="Password" required autocomplete="current-password">
       <button class="btn primary block" type="submit">Sign in</button><p class="err" id="signin-err"></p></form>`;
     $('signin').onsubmit = signIn;
@@ -441,6 +441,8 @@ async function renderLibrary() {
       : '<div class="empty"><i class="ti ti-presentation-off" style="font-size:22px; display:block; margin-bottom:6px;"></i>No decks yet. Upload one above and it appears on all your devices.</div>');
 }
 
+const lastEmail = () => { try { return localStorage.getItem('ll_last_email') || ''; } catch { return ''; } };
+
 async function signIn(e) {
   e.preventDefault();
   const f = e.target, err = $('signin-err'), btn = f.querySelector('button');
@@ -451,6 +453,7 @@ async function signIn(e) {
     if (!r.ok) throw new Error(data.error || 'Sign in failed');
     if (data.user.role !== 'admin') throw new Error('That account is not an admin');
     LL.setToken(data.token, 'admin');
+    try { localStorage.setItem('ll_last_email', data.user.email); } catch {}
     await refresh(true);
   } catch (ex) { err.textContent = ex.message; btn.disabled = false; }
 }
