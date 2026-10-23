@@ -94,6 +94,8 @@ public/styles.css  Shared styles: paper-and-ink palette, Bricolage Grotesque / I
 Nothing in the app links to it. To get there, type `present` on any page (outside a text box), tap the LaundryLoop
 logo five times quickly, or open `/present` directly.
 
+- Separate **Upload PowerPoint** and **Upload PDF** buttons (or drop a file). A PDF is presented page by page, one
+  page per slide.
 - Accepts **.pptx**, **.pdf** and images (several images become one deck, ordered by file name). Old `.ppt` files
   must be saved as .pptx or PDF first.
 - PPTX slides are drawn in the browser ([pptx-preview](https://www.npmjs.com/package/pptx-preview)), so animations,

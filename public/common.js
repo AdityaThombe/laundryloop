@@ -307,6 +307,100 @@ const LL = (() => {
     },
   };
 
+  // A small moving picture of what is happening to an order right now.
+  function scene(status) {
+    const machine = (kind) => `<div class="wm ${kind}"><span class="knobs"></span><div class="door"><div class="drum"></div></div></div>`;
+    const inner = {
+      booked: '<span class="ring"></span><span class="ring r2"></span><i class="ti ti-building-store"></i>',
+      accepted: '<i class="ti ti-motorbike rider"></i><span class="road"></span>',
+      picked_up: '<i class="ti ti-motorbike rider"></i><span class="road"></span>',
+      out_for_delivery: '<i class="ti ti-motorbike rider"></i><span class="road"></span>',
+      at_provider: '<i class="ti ti-scale tilt"></i>',
+      washing: machine('wash') + '<span class="bub"></span><span class="bub b2"></span><span class="bub b3"></span>',
+      drying: machine('dry') + '<span class="heat"></span>',
+      ironing: '<span class="steam"></span><span class="steam s2"></span><i class="ti ti-ironing-1 iron"></i><span class="cloth"></span>',
+      ready: '<div class="swing"><i class="ti ti-hanger"></i><i class="ti ti-shirt"></i></div>',
+    }[status];
+    return inner ? `<div class="scene" data-s="${status}" aria-hidden="true">${inner}</div>` : '';
+  }
+
+  // ---------- motion ----------
+  // Views are re-rendered wholesale (on navigation and on every live update), so motion is driven
+  // from here by watching the view: content staggers in only after navigation, items whose data
+  // changed flash, new items slide in, and numbers roll to their new value.
+  const motion = (() => {
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    let freshUntil = Date.now() + 4000; // first load
+    window.addEventListener('hashchange', () => { freshUntil = Date.now() + 2500; });
+    const ITEM = '.status-hero, .order-card:not(.static), .req, .job, tr.click';
+    const NUM = '.tile .n, .stat-strip .n, .stat .n, .price-row .p, .earn';
+    const seen = new Map();   // item key -> text it showed
+    const nums = new Map();   // number key -> value it showed
+
+    const itemKey = (el) => { const code = (el.textContent.match(/LL-\d+/) || [])[0]; return code && el.classList[0] + ':' + code; };
+    const numKey = (el, i) => (el.parentElement?.querySelector('.l')?.textContent || el.className + i);
+
+    function rollNumber(el, from, to) {
+      const node = [...el.childNodes].find((n) => n.nodeType === 3 && /\d/.test(n.textContent));
+      if (!node) return;
+      const m = node.textContent.match(/^(\D*)([\d,]+)(.*)$/s);
+      if (!m) return;
+      const [, pre, , post] = m;
+      const t0 = performance.now();
+      const dur = Math.min(900, 350 + Math.abs(to - from) * 6);
+      const step = (t) => {
+        const k = Math.min(1, (t - t0) / dur);
+        const v = Math.round(from + (to - from) * (1 - Math.pow(1 - k, 3)));
+        node.textContent = pre + v.toLocaleString('en-IN') + post;
+        if (k < 1 && el.isConnected) requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    }
+
+    function scan(root) {
+      const fresh = Date.now() < freshUntil;
+      if (fresh && !reduce) {
+        // Stagger the top-level blocks of the screen in.
+        [...root.children].forEach((c, i) => { c.style.setProperty('--i', Math.min(i, 12)); c.classList.add('stagger-in'); });
+        root.classList.add('fresh');
+        clearTimeout(root._freshT);
+        root._freshT = setTimeout(() => root.classList.remove('fresh'), 1400);
+      }
+      root.querySelectorAll(ITEM).forEach((el) => {
+        const key = itemKey(el);
+        if (!key) return;
+        const sig = el.textContent.replace(/\s+/g, ' ');
+        if (seen.has(key) && !fresh && !reduce) {
+          if (seen.get(key) !== sig) el.classList.add('flash');
+        } else if (!seen.has(key) && seen.size && !fresh && !reduce) {
+          el.classList.add('arrive');
+        }
+        seen.set(key, sig);
+      });
+      root.querySelectorAll(NUM).forEach((el, i) => {
+        const key = numKey(el, i);
+        const val = Number((el.textContent.match(/[\d,]+/) || [''])[0].replace(/,/g, ''));
+        if (!Number.isFinite(val) || !/\d/.test(el.textContent)) return;
+        const prev = nums.has(key) ? nums.get(key) : fresh ? 0 : val;
+        nums.set(key, val);
+        if (prev !== val && !reduce) {
+          rollNumber(el, prev, val);
+          if (nums.size && !fresh) el.classList.add('bump');
+        }
+      });
+    }
+
+    function watch(root) {
+      if (!root || root._watched) return;
+      root._watched = true;
+      new MutationObserver((muts) => { if (muts.some((m) => m.target === root && m.addedNodes.length)) scan(root); })
+        .observe(root, { childList: true });
+    }
+    const start = () => ['view', 'main'].forEach((id) => watch(document.getElementById(id)));
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
+    return { scan };
+  })();
+
   // Hidden way into the slide presenter (/present): type "present" anywhere outside a text field,
   // or tap the LaundryLoop logo five times quickly. Nothing in the UI links to it.
   if (location.pathname !== '/present') {
@@ -334,7 +428,7 @@ const LL = (() => {
 
   return {
     STATUS, ACTION, HOME, mapsLink, pinLink, setTheme, themePicker, skeleton, api, getToken, setToken, requireRole, logout, live, esc, rupee, slotLabel,
-    localDate, addDays, fmtDay, fmtTime, fmtSlot, ago, statusChip, initials, stepperHtml, toast, busy, clock, legPanel, leg,
+    localDate, addDays, fmtDay, fmtTime, fmtSlot, ago, statusChip, initials, stepperHtml, toast, busy, clock, legPanel, leg, scene, motion,
     get config() { return config; },
   };
 })();

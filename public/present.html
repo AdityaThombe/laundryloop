@@ -43,6 +43,9 @@
   .drop .fmts{display:flex; gap:6px; justify-content:center; flex-wrap:wrap; margin-top:16px;}
   .drop .fmts span{font-family:var(--mono); font-size:11px; font-weight:600; padding:3px 8px; border-radius:4px; background:var(--card-2); color:var(--ink-soft); border:1px solid var(--line);}
   .drop.busy{pointer-events:none;}
+  .drop .up-btns{display:flex; gap:10px; justify-content:center; flex-wrap:wrap;}
+  .drop .up-btns .btn.ghost{background:transparent; color:var(--ink); border-color:var(--line);}
+  .drop .up-btns .btn.ghost:hover{border-color:var(--ink-soft);}
   .drop.busy .ic i{animation:spin 1s linear infinite;}
   .note{font-size:12.5px; color:var(--ink-faint); margin:12px 2px 0; display:flex; gap:8px; align-items:flex-start; line-height:1.55;}
   .note i{font-size:16px; margin-top:1px;}
@@ -114,6 +117,7 @@
 
   .grid{position:absolute; inset:0; z-index:8; background:#121110; overflow-y:auto; padding:72px 28px 40px; display:none;}
   .grid.on{display:block; animation:fadeIn .2s ease;}
+  .grid{scroll-padding-top:80px;}
   .grid .hd{position:fixed; top:0; left:0; right:0; display:flex; align-items:center; padding:16px 28px; color:#fff; font-weight:700; font-size:15px; background:#121110; border-bottom:1px solid #2A2824; z-index:1;}
   .grid .hd .cb{margin-left:auto;}
   .thumbs{display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:18px; max-width:1400px; margin:0 auto;}
@@ -139,16 +143,21 @@
     <a class="back" href="/"><i class="ti ti-arrow-left"></i>Back to app</a>
   </div>
   <h1>Present right from the browser</h1>
-  <p class="intro">Upload a deck once and present it full screen from here, with no PowerPoint needed. Decks are saved privately in this browser on this device.</p>
+  <p class="intro">Upload a PowerPoint or a PDF once and present it full screen from here, with no PowerPoint needed. Decks are saved privately in this browser on this device.</p>
 
-  <label class="drop" id="drop">
+  <div class="drop" id="drop" role="button" tabindex="0">
     <input type="file" id="file" hidden multiple accept=".pptx,.pdf,.ppt,image/*,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation">
+    <input type="file" id="file-pptx" hidden accept=".pptx,.ppt,application/vnd.openxmlformats-officedocument.presentationml.presentation">
+    <input type="file" id="file-pdf" hidden accept=".pdf,application/pdf">
     <div class="ic"><i class="ti ti-presentation"></i></div>
-    <b id="drop-t">Drop your presentation here</b>
-    <p id="drop-s">or click to choose a file</p>
-    <span class="btn primary"><i class="ti ti-upload"></i>Upload deck</span>
+    <b id="drop-t">Drop a PowerPoint or PDF here</b>
+    <p id="drop-s">PDFs are shown page by page: each page becomes one slide.</p>
+    <div class="up-btns">
+      <button type="button" class="btn primary" id="pick-pptx"><i class="ti ti-presentation"></i>Upload PowerPoint</button>
+      <button type="button" class="btn ghost" id="pick-pdf"><i class="ti ti-file-type-pdf"></i>Upload PDF</button>
+    </div>
     <div class="fmts"><span>PPTX</span><span>PDF</span><span>PNG / JPG</span></div>
-  </label>
+  </div>
   <p class="note"><i class="ti ti-info-circle"></i><span>PowerPoint files are drawn in the browser, so animations, video and some fonts may differ. For a pixel-perfect copy, export as PDF in PowerPoint (<b>File → Export → PDF</b>) and upload that. Old <b>.ppt</b> files must be saved as .pptx or PDF first.</span></p>
 
   <h2>Your decks</h2>
@@ -234,6 +243,7 @@ const kindOf = (f) => {
 };
 const fmtSize = (b) => (b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB');
 const baseName = (n) => n.replace(/\.[^.]+$/, '');
+const units = (kind, n) => `${n} ${kind === 'pdf' ? 'page' : 'slide'}${n === 1 ? '' : 's'}`;
 
 // ---------- decks: one interface over PPTX, PDF and image sets ----------
 // A deck has a slide count, a natural slide size (w × h) and can mount slide i into an element at that size.
@@ -340,7 +350,7 @@ async function renderLibrary() {
       </div>
       <div class="info">
         <div><div class="nm">${esc(d.name)}</div>
-          <div class="sub">${d.slides ? `${d.slides} slide${d.slides === 1 ? '' : 's'} · ` : ''}${fmtSize(d.size)} · ${esc(new Date(d.added).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }))}</div></div>
+          <div class="sub">${d.slides ? `${units(d.kind, d.slides)} · ` : ''}${fmtSize(d.size)} · ${esc(new Date(d.added).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }))}</div></div>
         <div class="acts">
           <button class="btn primary small" onclick="present(${d.id})"><i class="ti ti-player-play"></i>Present</button>
           <button class="btn ghost small" onclick="removeDeck(${d.id}, this)" title="Delete deck" aria-label="Delete deck"><i class="ti ti-trash"></i></button>
@@ -402,21 +412,25 @@ async function addFiles(list) {
       deck.destroy();
       rec.added = Date.now();
       await DB.put(rec);
-      toast(`${rec.name} added · ${rec.slides} slide${rec.slides === 1 ? '' : 's'}`);
+      toast(`${rec.name} added · ${units(rec.kind, rec.slides)}`);
     }
   } catch (e) {
     toast(e.message && !/^\w+Error$/.test(e.name || '') ? e.message : 'Could not read that file', true);
     console.error(e);
   } finally {
     drop.classList.remove('busy');
-    $('drop-t').textContent = 'Drop your presentation here';
-    $('drop-s').textContent = 'or click to choose a file';
-    $('file').value = '';
+    $('drop-t').textContent = 'Drop a PowerPoint or PDF here';
+    $('drop-s').textContent = 'PDFs are shown page by page: each page becomes one slide.';
+    ['file', 'file-pptx', 'file-pdf'].forEach((id) => { $(id).value = ''; });
     renderLibrary();
   }
 }
 
-$('file').addEventListener('change', (e) => addFiles(e.target.files));
+['file', 'file-pptx', 'file-pdf'].forEach((id) => $(id).addEventListener('change', (e) => addFiles(e.target.files)));
+$('pick-pptx').onclick = (e) => { e.stopPropagation(); $('file-pptx').click(); };
+$('pick-pdf').onclick = (e) => { e.stopPropagation(); $('file-pdf').click(); };
+$('drop').addEventListener('click', (e) => { if (!e.target.closest('input')) $('file').click(); });
+$('drop').addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('file').click(); } });
 const drop = $('drop');
 ['dragenter', 'dragover'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add('over'); }));
 ['dragleave', 'drop'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
@@ -550,7 +564,7 @@ function toggleGrid(force) {
   g.classList.toggle('on', on);
   $('btn-grid').classList.toggle('on', on);
   if (!on) return;
-  $('grid-title').textContent = `${P.rec.name} · ${P.deck.count} slides`;
+  $('grid-title').textContent = `${P.rec.name} · ${units(P.rec.kind, P.deck.count)}`;
   const thumbs = $('thumbs');
   if (!thumbs.children.length) {
     const d = P.deck;

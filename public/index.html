@@ -69,6 +69,31 @@
   .demo-grid b{font-weight:600;}
   .demo-grid span{font-size:12px; color:var(--ink-faint); margin-left:auto;}
 
+  /* Alive: the label hangs and sways; each care symbol lights up with its step in turn. */
+  .label{transform-origin:50% -30px; animation:labelSway 6s ease-in-out infinite;}
+  @keyframes labelSway{0%,100%{transform:rotate(-2.5deg);} 50%{transform:rotate(1deg);}}
+  .label .sym i, .label ol li{transition:color .3s, opacity .3s, transform .3s var(--ease);}
+  .label .sym i{opacity:.35;}
+  .label ol li{opacity:.45;}
+  .label .sym i.on{opacity:1; color:var(--brand); transform:translateY(-2px) scale(1.12);}
+  .label ol li.on{opacity:1;}
+  .label ol li.on span{color:var(--brand);}
+  .hero h1, .hero .lede, .hero .label, .hero-foot{animation:heroIn .7s var(--ease) both;}
+  .hero .lede{animation-delay:.08s;} .hero .label{animation:heroIn .7s var(--ease) both .16s, labelSway 6s ease-in-out infinite .9s;} .hero-foot{animation-delay:.24s;}
+  @keyframes heroIn{from{opacity:0; transform:translateY(14px);} to{opacity:1; transform:none;}}
+  .next-slot{display:inline-flex; align-items:center; gap:8px; font-size:13.5px; color:#F3F7F4; background:rgba(255,255,255,.1); padding:6px 12px; border-radius:999px; align-self:flex-start; opacity:0; transition:opacity .4s;}
+  .next-slot.on{opacity:1;}
+  .next-slot::before{content:''; width:8px; height:8px; border-radius:50%; background:var(--tag); animation:beacon 1.8s ease-out infinite; color:var(--tag);}
+  .next-slot b{font-weight:600;}
+  .mobile-next{margin:10px 0 0; font-size:13px; color:var(--brand); display:none; align-items:center; gap:7px;}
+  .mobile-next.on{display:flex;}
+  .mobile-next::before{content:''; width:7px; height:7px; border-radius:50%; background:var(--brand); animation:beacon 1.8s ease-out infinite; color:var(--brand);}
+  .wrap{animation:heroIn .5s var(--ease) both .1s;}
+  .tabs button{transition:color .2s, border-color .25s;}
+  #login-form, #register-form{animation:heroIn .3s var(--ease);}
+  .err:not(:empty){animation:shakeX .35s;}
+  @keyframes shakeX{25%{transform:translateX(-4px);} 75%{transform:translateX(4px);}}
+  @media (max-width:900px){ .hero{display:none;} }
   @media (max-width:900px){
     .split{grid-template-columns:1fr;}
     .hero{display:none;}
@@ -87,6 +112,7 @@
     <div class="logo" id="logo">LaundryLoop</div>
     <h1>Your laundry, picked up and brought back when you say.</h1>
     <p class="lede">Choose a slot. A rider collects the bag, a homemaker or laundry near you washes and irons it, and it comes back in the slot you picked.</p>
+    <span class="next-slot" id="next-slot"></span>
     <div class="label" aria-label="How an order works">
       <div class="sym" aria-hidden="true"><i class="ti ti-wash-temperature-2"></i><i class="ti ti-wash-tumble-dry"></i><i class="ti ti-ironing-2"></i><i class="ti ti-wash-dry-hang"></i></div>
       <ol>
@@ -106,6 +132,7 @@
       <div class="mobile-brand">
         <p class="wordmark" id="mobile-logo">LaundryLoop</p>
         <p class="tagline">Laundry picked up from your door, washed nearby, and back in your slot.</p>
+        <p class="mobile-next" id="mobile-next"></p>
       </div>
       <h2>Sign in</h2>
       <p class="sub">Customers, partners and riders all sign in here.</p>
@@ -239,6 +266,26 @@
       done(await LL.api('/api/auth/register', { method: 'POST', body }));
     } catch (ex) { err.textContent = ex.message; btn.disabled = false; }
   };
+
+
+  // The care label walks through its steps, one symbol at a time.
+  (() => {
+    const syms = document.querySelectorAll('.label .sym i'), steps = document.querySelectorAll('.label ol li');
+    let k = 0;
+    const show = () => { syms.forEach((e, i) => e.classList.toggle('on', i === k)); steps.forEach((e, i) => e.classList.toggle('on', i === k)); k = (k + 1) % steps.length; };
+    show();
+    if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) setInterval(show, 1800);
+    else { syms.forEach((e) => e.classList.add('on')); steps.forEach((e) => e.classList.add('on')); }
+  })();
+
+  // The next pickup slot anyone could book right now, from the live slot list.
+  LL.api('/api/slots').then((s) => {
+    const d = s.pickupDates[0];
+    if (!d) return;
+    const label = s.slots.find((x) => x.id === d.slots[0])?.label || d.slots[0];
+    const text = `Next free pickup: <b>${LL.esc(LL.fmtDay(d.date))}, ${LL.esc(label)}</b>`;
+    for (const id of ['next-slot', 'mobile-next']) { const el = document.getElementById(id); el.innerHTML = text; el.classList.add('on'); }
+  }).catch(() => {});
 
   LL.api('/api/config').then((cfg) => {
     const shown = DEMO.map((d, i) => [d, i]).filter(([d]) => cfg.demo && (d[0] !== 'Admin' || cfg.demoAdmin));

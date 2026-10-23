@@ -125,6 +125,7 @@ async function home() {
       : ['ready', 'out_for_delivery'].includes(o.status) && o.delivery_otp ? `Delivery code <b>${esc(o.delivery_otp)}</b>` : '';
     return `<div class="status-hero">
       <p class="eyebrow"><b style="color:var(--ink);">${esc(o.code)}</b>${LL.statusChip(o.status)}<span style="margin-left:auto;">${esc(o.service_name)}</span></p>
+      ${o.needs_reschedule ? '' : LL.scene(o.status)}
       <p class="headline">${esc(whereNow(o))}</p>
       <p class="sub">${esc(when)}${code ? ` · ${code}` : ''}</p>
       <div class="bar-track"><div class="bar-fill" style="width:${Math.max(4, o.progress * 100)}%"></div></div>
@@ -387,6 +388,7 @@ async function track(id) {
 
   view.innerHTML = `${header(o.code, 'orders', LL.statusChip(o.status))}
     <p class="lead">${esc(o.service_name)} · ${kg}${o.items_count ? ` · ${o.items_received ?? o.items_count} items` : ''} · booked ${esc(fmtTime(o.created_at))}</p>
+    ${ACTIVE(o) && !o.needs_reschedule && HEADLINE[o.status] ? `<div class="now">${LL.scene(o.status)}<p>${esc(HEADLINE[o.status])}<small>${esc(whereNow(o))}</small></p></div>` : ''}
     ${reschedule}
     ${codeBox}
     ${riderCard}
