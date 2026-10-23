@@ -83,9 +83,24 @@ public/customer.html
 public/provider.html
 public/rider.html
 public/admin.html
+public/present.html Hidden slide presenter (see below)
 public/common.js   Shared API client, live updates, formatting, timeline
-public/styles.css  Shared styles (from the original prototype)
+public/styles.css  Shared design system (Inter, brand gradient, light and dark themes)
 ```
+
+## Hidden slide presenter
+
+`/present` lets you upload a deck and present it full screen in the browser, so you don't need to open PowerPoint.
+Nothing in the app links to it. To get there, type `present` on any page (outside a text box), tap the LaundryLoop
+logo five times quickly, or open `/present` directly.
+
+- Accepts **.pptx**, **.pdf** and images (several images become one deck, ordered by file name). Old `.ppt` files
+  must be saved as .pptx or PDF first.
+- PPTX slides are drawn in the browser ([pptx-preview](https://www.npmjs.com/package/pptx-preview)), so animations,
+  video and some fonts can differ. Exporting to PDF from PowerPoint gives an exact copy ([PDF.js](https://mozilla.github.io/pdf.js/)).
+- Decks are saved in the browser (IndexedDB) on that device only; nothing is uploaded to the server.
+- Keys: `→`/`Space` next, `←` previous, `F` full screen, `G` all slides, `B` black screen, a number then `Enter`
+  jumps to that slide, `Esc` exits. Swipe works on touch screens, and clicking the left or right half of the slide steps back or forward.
 
 ## What it does not do yet
 

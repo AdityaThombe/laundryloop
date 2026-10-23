@@ -307,6 +307,25 @@ const LL = (() => {
     },
   };
 
+  // Hidden way into the slide presenter (/present): type "present" anywhere outside a text field,
+  // or tap the LaundryLoop logo five times quickly. Nothing in the UI links to it.
+  if (location.pathname !== '/present') {
+    let typed = '';
+    document.addEventListener('keydown', (e) => {
+      if (e.metaKey || e.ctrlKey || e.altKey || e.key.length !== 1 || e.target.closest?.('input, textarea, select, [contenteditable]')) return;
+      typed = (typed + e.key.toLowerCase()).slice(-7);
+      if (typed === 'present') location.href = '/present';
+    });
+    let taps = 0;
+    let tapTimer;
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest?.('.brandmark, #logo, #mobile-logo, .side .brand')) return;
+      clearTimeout(tapTimer);
+      tapTimer = setTimeout(() => { taps = 0; }, 1500);
+      if (++taps >= 5) location.href = '/present';
+    });
+  }
+
   function clock(el) {
     const tick = () => { el.textContent = new Date().toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' }); };
     tick();

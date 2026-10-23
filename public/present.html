@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>LaundryLoop Presenter</title>
+<meta name="theme-color" content="#07080C">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css">
+<link rel="stylesheet" href="/styles.css">
+<style>
+  /* The presenter is always dark, whatever the app theme: it is made for projectors and big screens. */
+  :root{
+    --page:#07080C; --card:#12151C; --card-2:#1A1E27; --line:#262B36; --line-soft:#1D212A;
+    --ink:#F1F3F8; --ink-soft:#A3AABA; --ink-faint:#687083; --brand:#7C83FF; --brand-soft:#1C1F3D;
+    --red-ink:#FDA4B4; --red-tint:#33151D; color-scheme:dark;
+  }
+  body{min-height:100dvh; background:
+    radial-gradient(1000px 560px at 10% -10%, rgba(79,70,229,.28), transparent 60%),
+    radial-gradient(800px 500px at 110% 100%, rgba(14,165,233,.18), transparent 60%), var(--page);}
+
+  /* ---------- library ---------- */
+  .lib{max-width:1120px; margin:0 auto; padding:calc(24px + env(safe-area-inset-top)) 20px 64px;}
+  .top{display:flex; align-items:center; gap:12px; margin-bottom:40px;}
+  .top .logo{display:inline-flex; align-items:center; gap:10px; font-weight:800; font-size:17px; letter-spacing:-.03em; color:var(--ink); text-decoration:none;}
+  .top .logo i{width:32px; height:32px; border-radius:10px; background:var(--grad); color:#fff; font-size:18px; display:flex; align-items:center; justify-content:center; box-shadow:var(--shadow-brand);}
+  .top .tag{font-size:10.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:#A9AEFF; background:var(--brand-soft); padding:3px 9px; border-radius:999px;}
+  .top .back{margin-left:auto; color:var(--ink-soft); text-decoration:none; font-size:13px; font-weight:500; display:inline-flex; align-items:center; gap:6px;}
+  .top .back:hover{color:var(--ink);}
+  .top .back{white-space:nowrap;}
+  @media (max-width:480px){ .top .tag{display:none;} }
+  h1{font-size:clamp(28px,4vw,40px); letter-spacing:-.04em; font-weight:800; margin:0 0 8px; color:var(--ink);}
+  .intro{color:var(--ink-soft); font-size:15px; margin:0 0 28px; max-width:620px; line-height:1.6;}
+
+  .drop{
+    display:block; position:relative; border-radius:24px; padding:44px 24px; text-align:center; cursor:pointer;
+    border:1.5px dashed #343B4A; background:linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.01));
+    transition:border-color .2s, background .2s, transform .2s var(--ease);
+  }
+  .drop:hover{border-color:#4B5468;}
+  .drop.over{border-color:var(--brand); background:rgba(124,131,255,.08); transform:scale(1.005);}
+  .drop .ic{width:64px; height:64px; margin:0 auto 16px; border-radius:20px; background:var(--grad); color:#fff; font-size:30px; display:flex; align-items:center; justify-content:center; box-shadow:var(--shadow-brand);}
+  .drop b{display:block; font-size:18px; letter-spacing:-.02em; color:var(--ink);}
+  .drop p{color:var(--ink-soft); margin:6px 0 18px; font-size:13.5px;}
+  .drop .fmts{display:flex; gap:6px; justify-content:center; flex-wrap:wrap; margin-top:16px;}
+  .drop .fmts span{font-size:11px; font-weight:700; letter-spacing:.05em; padding:3px 9px; border-radius:999px; background:var(--card-2); color:var(--ink-soft); border:1px solid var(--line);}
+  .drop.busy{pointer-events:none;}
+  .drop.busy .ic i{animation:spin 1s linear infinite;}
+  .note{font-size:12.5px; color:var(--ink-faint); margin:12px 2px 0; display:flex; gap:8px; align-items:flex-start; line-height:1.55;}
+  .note i{font-size:16px; margin-top:1px;}
+
+  .lib h2{font-size:13px; font-weight:700; letter-spacing:.07em; text-transform:uppercase; color:var(--ink-faint); margin:40px 0 14px; display:flex; align-items:center; gap:8px;}
+  .decks{display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:16px;}
+  .deck{background:var(--card); border:1px solid var(--line); border-radius:18px; overflow:hidden; display:flex; flex-direction:column; transition:transform .25s var(--ease), box-shadow .25s, border-color .25s; animation:rise .35s var(--ease) both;}
+  .deck:hover{transform:translateY(-3px); box-shadow:0 24px 48px -20px rgba(0,0,0,.8); border-color:#343B4A;}
+  .cover{aspect-ratio:16/9; position:relative; background:#0B0D12; overflow:hidden; cursor:pointer; display:flex; align-items:center; justify-content:center;}
+  .cover img{width:100%; height:100%; object-fit:contain; background:#fff;}
+  .cover .ph{position:absolute; inset:0; display:flex; flex-direction:column; justify-content:flex-end; padding:16px; color:#fff; background:linear-gradient(135deg,#312E81,#4338CA 45%,#0EA5E9);}
+  .cover .ph::before{content:''; position:absolute; right:-40px; top:-40px; width:160px; height:160px; border-radius:50%; border:26px solid rgba(255,255,255,.1);}
+  .cover .ph i{font-size:30px; opacity:.9; margin-bottom:8px;}
+  .cover .ph b{font-size:15px; letter-spacing:-.02em; line-height:1.25; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;}
+  .cover .play{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(7,8,12,.45); opacity:0; transition:opacity .2s;}
+  .cover .play span{width:54px; height:54px; border-radius:50%; background:#fff; color:#111; display:flex; align-items:center; justify-content:center; font-size:24px; box-shadow:0 10px 30px rgba(0,0,0,.5); transform:scale(.85); transition:transform .25s var(--ease);}
+  .cover:hover .play{opacity:1;}
+  .cover:hover .play span{transform:scale(1);}
+  .kind{position:absolute; top:10px; left:10px; font-size:10.5px; font-weight:800; letter-spacing:.06em; padding:3px 8px; border-radius:7px; background:rgba(7,8,12,.7); color:#fff; -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px); z-index:1;}
+  .deck .info{padding:14px 16px 16px; display:flex; flex-direction:column; gap:12px; flex:1;}
+  .deck .nm{font-weight:700; font-size:14.5px; letter-spacing:-.015em; color:var(--ink); word-break:break-word;}
+  .deck .sub{font-size:12px; color:var(--ink-faint); margin-top:3px;}
+  .deck .acts{display:flex; gap:8px; margin-top:auto;}
+  .deck .acts .btn.primary{flex:1;}
+  .empty{border:1px solid var(--line); border-radius:18px; padding:28px; text-align:center; color:var(--ink-faint); font-size:13.5px;}
+  .keys{display:flex; flex-wrap:wrap; gap:8px 18px; margin-top:34px; color:var(--ink-faint); font-size:12.5px;}
+  kbd{font-family:inherit; font-size:11px; font-weight:700; padding:2px 7px; border-radius:6px; background:var(--card-2); border:1px solid var(--line); border-bottom-width:2px; color:var(--ink-soft); margin-right:4px;}
+
+  /* ---------- presenter ---------- */
+  .show{position:fixed; inset:0; z-index:50; background:#000; display:none; overflow:hidden; user-select:none; -webkit-user-select:none; touch-action:pan-y;}
+  .show.on{display:block;}
+  .show.idle{cursor:none;}
+  .stage{position:absolute; inset:0;}
+  .slide{position:absolute; left:50%; top:50%; transform-origin:center center; background:#fff; box-shadow:0 0 80px rgba(0,0,0,.6); opacity:0; transition:opacity .45s var(--ease), transform .55s var(--ease); overflow:hidden;}
+  .slide.in{opacity:1;}
+  .slide > *{position:absolute !important; left:0 !important; top:0 !important; margin:0 !important;}
+  .slide canvas, .slide img{display:block; width:100%; height:100%;}
+  .slide .spin{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:#0B0D12;}
+  .slide .spin::after{content:''; width:30px; height:30px; border-radius:50%; border:3px solid rgba(255,255,255,.15); border-top-color:#fff; animation:spin .8s linear infinite;}
+  .blackout{position:absolute; inset:0; background:#000; opacity:0; pointer-events:none; transition:opacity .3s; z-index:4;}
+  .show.black .blackout{opacity:1;}
+  .hit{position:absolute; top:0; bottom:0; width:50%; z-index:2; cursor:pointer;}
+  .hit.l{left:0; cursor:w-resize;} .hit.r{right:0; cursor:e-resize;}
+  .show.idle .hit{cursor:none;}
+
+  .hud{position:absolute; z-index:5; transition:opacity .35s, transform .35s var(--ease);}
+  .show.idle .hud{opacity:0; pointer-events:none;}
+  .hud.title{top:max(16px, env(safe-area-inset-top)); left:20px; right:20px; display:flex; align-items:center; gap:12px; color:rgba(255,255,255,.85); font-size:13px; font-weight:600;}
+  .show.idle .hud.title{transform:translateY(-8px);}
+  .hud.title .t{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; text-shadow:0 1px 8px rgba(0,0,0,.8);}
+  .hud.title .x{margin-left:auto;}
+  .bar{
+    bottom:max(18px, env(safe-area-inset-bottom)); left:50%; transform:translateX(-50%);
+    display:flex; align-items:center; gap:4px; padding:6px; border-radius:16px;
+    background:rgba(18,21,28,.78); border:1px solid rgba(255,255,255,.1); box-shadow:0 20px 50px -12px rgba(0,0,0,.8);
+    -webkit-backdrop-filter:blur(18px) saturate(160%); backdrop-filter:blur(18px) saturate(160%);
+  }
+  .show.idle .bar{transform:translate(-50%,10px);}
+  .cb{width:40px; height:40px; border-radius:11px; border:none; background:none; color:#E6E8EE; font-size:20px; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:background .15s, color .15s;}
+  .cb:hover{background:rgba(255,255,255,.1); color:#fff;}
+  .cb:disabled{opacity:.3; cursor:default; background:none;}
+  .cb.on{background:rgba(124,131,255,.25); color:#fff;}
+  .count{min-width:84px; text-align:center; color:#fff; font-size:13.5px; font-weight:700; font-variant-numeric:tabular-nums; letter-spacing:.01em;}
+  .count small{color:rgba(255,255,255,.5); font-weight:600;}
+  .sep{width:1px; height:22px; background:rgba(255,255,255,.12); margin:0 4px;}
+  .timer{color:rgba(255,255,255,.6); font-size:12.5px; font-weight:600; font-variant-numeric:tabular-nums; padding:0 8px 0 4px; cursor:pointer;}
+  .progress{position:absolute; left:0; bottom:0; height:3px; background:var(--grad); z-index:5; transition:width .45s var(--ease); box-shadow:0 0 12px rgba(124,131,255,.8);}
+  .jump{position:absolute; z-index:6; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(18,21,28,.9); color:#fff; font-size:44px; font-weight:800; padding:14px 28px; border-radius:18px; font-variant-numeric:tabular-nums; display:none; border:1px solid rgba(255,255,255,.12);}
+  .jump.on{display:block;}
+
+  .grid{position:absolute; inset:0; z-index:8; background:rgba(7,8,12,.94); -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px); overflow-y:auto; padding:72px 28px 40px; display:none;}
+  .grid.on{display:block; animation:fadeIn .2s ease;}
+  .grid .hd{position:fixed; top:0; left:0; right:0; display:flex; align-items:center; padding:16px 28px; color:#fff; font-weight:700; font-size:15px; background:linear-gradient(rgba(7,8,12,.95),rgba(7,8,12,0)); z-index:1;}
+  .grid .hd .cb{margin-left:auto;}
+  .thumbs{display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:18px; max-width:1400px; margin:0 auto;}
+  .th{cursor:pointer; color:rgba(255,255,255,.6); font-size:12px; font-weight:600;}
+  .th .box{position:relative; overflow:hidden; border-radius:10px; background:#fff; outline:2px solid transparent; outline-offset:3px; transition:outline-color .15s, transform .2s var(--ease); margin-bottom:8px;}
+  .th:hover .box{transform:translateY(-2px); outline-color:rgba(255,255,255,.35);}
+  .th.cur .box{outline-color:var(--brand);}
+  .th.cur{color:#fff;}
+  .th .box > div{position:absolute; left:0; top:0; transform-origin:0 0;}
+  .th .box > div > *{position:absolute !important; left:0 !important; top:0 !important; margin:0 !important;}
+  .th canvas, .th img{display:block; width:100%; height:100%;}
+
+  @media (max-width:640px){
+    .count{min-width:64px;}
+    .timer, .bar .sep.opt, .bar .opt{display:none;}
+  }
+</style>
+</head>
+<body>
+<div class="lib" id="lib">
+  <div class="top">
+    <a class="logo" href="/"><i class="ti ti-refresh"></i>LaundryLoop</a><span class="tag">Presenter</span>
+    <a class="back" href="/"><i class="ti ti-arrow-left"></i>Back to app</a>
+  </div>
+  <h1>Present right from the browser</h1>
+  <p class="intro">Upload a deck once and present it full screen from here, with no PowerPoint needed. Decks are saved privately in this browser on this device.</p>
+
+  <label class="drop" id="drop">
+    <input type="file" id="file" hidden multiple accept=".pptx,.pdf,.ppt,image/*,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation">
+    <div class="ic"><i class="ti ti-presentation"></i></div>
+    <b id="drop-t">Drop your presentation here</b>
+    <p id="drop-s">or click to choose a file</p>
+    <span class="btn primary"><i class="ti ti-upload"></i>Upload deck</span>
+    <div class="fmts"><span>PPTX</span><span>PDF</span><span>PNG / JPG</span></div>
+  </label>
+  <p class="note"><i class="ti ti-info-circle"></i><span>PowerPoint files are drawn in the browser, so animations, video and some fonts may differ. For a pixel-perfect copy, export as PDF in PowerPoint (<b>File → Export → PDF</b>) and upload that. Old <b>.ppt</b> files must be saved as .pptx or PDF first.</span></p>
+
+  <h2><i class="ti ti-stack-2"></i>Your decks</h2>
+  <div id="decks"></div>
+
+  <div class="keys">
+    <span><kbd>→</kbd><kbd>Space</kbd>Next</span><span><kbd>←</kbd>Previous</span><span><kbd>F</kbd>Full screen</span>
+    <span><kbd>G</kbd>All slides</span><span><kbd>B</kbd>Black screen</span><span><kbd>12</kbd><kbd>Enter</kbd>Go to slide</span><span><kbd>Esc</kbd>Exit</span>
+  </div>
+</div>
+
+<div class="show" id="show">
+  <div class="stage" id="stage"></div>
+  <div class="hit l" id="hit-l"></div><div class="hit r" id="hit-r"></div>
+  <div class="blackout"></div>
+  <div class="hud title"><span class="t" id="show-title"></span><button class="cb x" id="btn-close" title="Exit (Esc)"><i class="ti ti-x"></i></button></div>
+  <div class="hud bar">
+    <button class="cb" id="btn-prev" title="Previous (←)"><i class="ti ti-chevron-left"></i></button>
+    <span class="count" id="count"></span>
+    <button class="cb" id="btn-next" title="Next (→)"><i class="ti ti-chevron-right"></i></button>
+    <span class="sep"></span>
+    <button class="cb" id="btn-grid" title="All slides (G)"><i class="ti ti-layout-grid"></i></button>
+    <button class="cb opt" id="btn-black" title="Black screen (B)"><i class="ti ti-moon"></i></button>
+    <button class="cb" id="btn-fs" title="Full screen (F)"><i class="ti ti-maximize"></i></button>
+    <span class="sep opt"></span>
+    <span class="timer" id="timer" title="Time presenting · click to reset">0:00</span>
+  </div>
+  <div class="progress" id="progress"></div>
+  <div class="jump" id="jump"></div>
+  <div class="grid" id="grid"><div class="hd"><span id="grid-title">All slides</span><button class="cb" id="grid-close" title="Close (G)"><i class="ti ti-x"></i></button></div><div class="thumbs" id="thumbs"></div></div>
+</div>
+
+<script src="/common.js"></script>
+<script>
+const { esc, toast } = LL;
+const PPTX_LIB = 'https://cdn.jsdelivr.net/npm/pptx-preview@1.0.7/dist/pptx-preview.umd.js';
+const PDF_LIB = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs';
+const PDF_WORKER = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs';
+const $ = (id) => document.getElementById(id);
+
+// ---------- storage: decks live in IndexedDB, in this browser only ----------
+const DB = (() => {
+  let dbp;
+  const open = () => dbp || (dbp = new Promise((res, rej) => {
+    const r = indexedDB.open('ll-present', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('decks', { keyPath: 'id', autoIncrement: true });
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  }));
+  const tx = async (mode, fn) => {
+    const db = await open();
+    return new Promise((res, rej) => {
+      const t = db.transaction('decks', mode);
+      const req = fn(t.objectStore('decks'));
+      t.oncomplete = () => res(req?.result);
+      t.onerror = () => rej(t.error);
+    });
+  };
+  return {
+    all: () => tx('readonly', (s) => s.getAll()),
+    get: (id) => tx('readonly', (s) => s.get(id)),
+    put: (deck) => tx('readwrite', (s) => s.put(deck)),
+    del: (id) => tx('readwrite', (s) => s.delete(id)),
+  };
+})();
+
+const loadScript = (src) => new Promise((res, rej) => {
+  if (document.querySelector(`script[src="${src}"]`)) return res();
+  const s = document.createElement('script');
+  s.src = src; s.onload = res; s.onerror = () => rej(new Error('Could not load the slide renderer. Check your connection.'));
+  document.head.appendChild(s);
+});
+let pdfjsP;
+const pdfjs = () => pdfjsP || (pdfjsP = import(PDF_LIB).then((m) => { m.GlobalWorkerOptions.workerSrc = PDF_WORKER; return m; }));
+
+const kindOf = (f) => {
+  const n = f.name.toLowerCase();
+  if (n.endsWith('.pptx')) return 'pptx';
+  if (n.endsWith('.pdf') || f.type === 'application/pdf') return 'pdf';
+  if (n.endsWith('.ppt')) return 'ppt';
+  if (f.type.startsWith('image/')) return 'image';
+  return null;
+};
+const fmtSize = (b) => (b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB');
+const baseName = (n) => n.replace(/\.[^.]+$/, '');
+
+// ---------- decks: one interface over PPTX, PDF and image sets ----------
+// A deck has a slide count, a natural slide size (w × h) and can mount slide i into an element at that size.
+async function openPptx(blob) {
+  await loadScript(PPTX_LIB);
+  const host = document.createElement('div');
+  // Rendered off screen but not display:none, so SVG gradients and charts inside the slides still resolve.
+  host.style.cssText = 'position:fixed; left:-100000px; top:0; visibility:visible; pointer-events:none;';
+  document.body.appendChild(host);
+  const viewer = window.pptxPreview.init(host, { width: 960, height: 540, mode: 'list' });
+  await viewer.preview(await blob.arrayBuffer());
+  const nodes = [...host.querySelectorAll('.pptx-preview-slide-wrapper')];
+  if (!nodes.length) throw new Error('No slides found in this file.');
+  const w = nodes[0].offsetWidth, h = nodes[0].offsetHeight;
+  nodes.forEach((n) => { n.style.margin = '0'; n.style.position = 'absolute'; n.style.left = '0'; n.style.top = '0'; });
+  return {
+    count: nodes.length, w, h,
+    mount(i, el) { el.appendChild(nodes[i]); return Promise.resolve(); },
+    unmount(i) { if (nodes[i].parentNode !== host) host.appendChild(nodes[i]); },
+    thumb(i, el) { el.appendChild(cloneWithCanvas(nodes[i])); },
+    destroy() { host.remove(); },
+  };
+}
+// cloneNode drops canvas pixels (charts), so copy them across.
+function cloneWithCanvas(node) {
+  const c = node.cloneNode(true);
+  const src = node.querySelectorAll('canvas'), dst = c.querySelectorAll('canvas');
+  src.forEach((s, k) => { try { dst[k].getContext('2d').drawImage(s, 0, 0); } catch {} });
+  return c;
+}
+
+async function openPdf(blob) {
+  const lib = await pdfjs();
+  const doc = await lib.getDocument({ data: await blob.arrayBuffer() }).promise;
+  const first = (await doc.getPage(1)).getViewport({ scale: 1 });
+  const cache = new Map(); // "page@scale" -> canvas, small LRU
+  async function draw(i, scale) {
+    const key = `${i}@${scale.toFixed(2)}`;
+    if (cache.has(key)) { const c = cache.get(key); cache.delete(key); cache.set(key, c); return c; }
+    const page = await doc.getPage(i + 1);
+    const vp = page.getViewport({ scale });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(vp.width); canvas.height = Math.ceil(vp.height);
+    await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+    cache.set(key, canvas);
+    while (cache.size > 8) cache.delete(cache.keys().next().value);
+    return canvas;
+  }
+  return {
+    count: doc.numPages, w: first.width, h: first.height,
+    async mount(i, el, pxScale) {
+      const c = await draw(i, Math.min(pxScale, 4));
+      const copy = document.createElement('canvas');
+      copy.width = c.width; copy.height = c.height;
+      copy.getContext('2d').drawImage(c, 0, 0);
+      el.appendChild(copy);
+    },
+    unmount() {},
+    thumb(i, el) {
+      const box = document.createElement('div');
+      box.style.cssText = 'position:absolute; inset:0; background:#fff;';
+      el.appendChild(box);
+      draw(i, 0.5).then((c) => { const k = document.createElement('canvas'); k.width = c.width; k.height = c.height; k.getContext('2d').drawImage(c, 0, 0); k.style.cssText = 'width:100%; height:100%;'; box.appendChild(k); });
+    },
+    destroy() { doc.destroy(); },
+  };
+}
+
+async function openImages(files) {
+  const urls = files.map((f) => URL.createObjectURL(f.data));
+  const sizes = await Promise.all(urls.map((u) => new Promise((res) => {
+    const im = new Image(); im.onload = () => res([im.naturalWidth, im.naturalHeight]); im.onerror = () => res([1600, 900]); im.src = u;
+  })));
+  const [w, h] = sizes[0];
+  const img = (i) => { const im = document.createElement('img'); im.src = urls[i]; im.style.objectFit = 'contain'; im.style.background = '#000'; return im; };
+  return {
+    count: urls.length, w, h,
+    mount(i, el) { el.appendChild(img(i)); return Promise.resolve(); },
+    unmount() {},
+    thumb(i, el) { const im = img(i); im.style.cssText = 'position:absolute; inset:0; width:100%; height:100%; object-fit:contain; background:#000;'; el.appendChild(im); },
+    destroy() { urls.forEach((u) => URL.revokeObjectURL(u)); },
+  };
+}
+
+function openDeck(rec) {
+  if (rec.kind === 'pptx') return openPptx(rec.files[0].data);
+  if (rec.kind === 'pdf') return openPdf(rec.files[0].data);
+  return openImages(rec.files);
+}
+
+// ---------- library ----------
+async function renderLibrary() {
+  let decks = [];
+  try { decks = await DB.all(); } catch { $('decks').innerHTML = '<div class="empty">This browser is blocking storage, so decks can\'t be saved here. Try a normal (non-private) window.</div>'; return; }
+  decks.sort((a, b) => b.added - a.added);
+  if (!decks.length) { $('decks').innerHTML = '<div class="empty"><i class="ti ti-presentation-off" style="font-size:22px; display:block; margin-bottom:6px;"></i>No decks yet. Upload one above to get started.</div>'; return; }
+  const icon = { pptx: 'ti-presentation', pdf: 'ti-file-type-pdf', image: 'ti-photo' };
+  $('decks').innerHTML = `<div class="decks">${decks.map((d, k) => `
+    <div class="deck" style="animation-delay:${k * 40}ms">
+      <div class="cover" onclick="present(${d.id})">
+        <span class="kind">${d.kind === 'image' ? 'IMAGES' : d.kind.toUpperCase()}</span>
+        ${d.cover ? `<img src="${d.cover}" alt="">` : `<div class="ph"><i class="ti ${icon[d.kind]}"></i><b>${esc(d.name)}</b></div>`}
+        <div class="play"><span><i class="ti ti-player-play-filled"></i></span></div>
+      </div>
+      <div class="info">
+        <div><div class="nm">${esc(d.name)}</div>
+          <div class="sub">${d.slides ? `${d.slides} slide${d.slides === 1 ? '' : 's'} · ` : ''}${fmtSize(d.size)} · ${esc(new Date(d.added).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }))}</div></div>
+        <div class="acts">
+          <button class="btn primary small" onclick="present(${d.id})"><i class="ti ti-player-play"></i>Present</button>
+          <button class="btn ghost small" onclick="removeDeck(${d.id}, this)" title="Delete deck" aria-label="Delete deck"><i class="ti ti-trash"></i></button>
+        </div>
+      </div>
+    </div>`).join('')}</div>`;
+}
+
+async function removeDeck(id, btn) {
+  const d = await DB.get(id);
+  if (!d || !confirm(`Delete "${d.name}" from this browser?`)) return;
+  await DB.del(id);
+  toast('Deck deleted');
+  renderLibrary();
+}
+
+// A small first-slide image for the library card (PDF and images; PPTX keeps the styled placeholder).
+async function makeCover(deck, kind) {
+  if (kind === 'pptx') return null;
+  const el = document.createElement('div');
+  el.style.cssText = `position:fixed; left:-100000px; width:${deck.w}px; height:${deck.h}px;`;
+  document.body.appendChild(el);
+  try {
+    await deck.mount(0, el, 480 / deck.w);
+    const src = el.querySelector('canvas, img');
+    if (src.tagName === 'IMG') await src.decode().catch(() => {});
+    const c = document.createElement('canvas');
+    c.width = 480; c.height = Math.round(480 * deck.h / deck.w);
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+    ctx.drawImage(src, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', 0.82);
+  } catch { return null; }
+  finally { el.remove(); }
+}
+
+async function addFiles(list) {
+  const files = [...list];
+  if (!files.length) return;
+  const kinds = files.map(kindOf);
+  if (kinds.includes('ppt')) return toast('Old .ppt files can\'t be shown in a browser. Save it as .pptx or PDF first.', true);
+  if (kinds.includes(null)) return toast('Upload a .pptx, .pdf or image files', true);
+  const images = files.filter((f, i) => kinds[i] === 'image');
+  const docs = files.filter((f, i) => kinds[i] !== 'image');
+  const recs = docs.map((f) => ({ name: baseName(f.name), kind: kindOf(f), files: [{ name: f.name, type: f.type, data: f }], size: f.size }));
+  if (images.length) {
+    images.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+    recs.push({ name: images.length === 1 ? baseName(images[0].name) : `${images.length} images`, kind: 'image', files: images.map((f) => ({ name: f.name, type: f.type, data: f })), size: images.reduce((s, f) => s + f.size, 0) });
+  }
+  const drop = $('drop');
+  drop.classList.add('busy');
+  try {
+    for (const rec of recs) {
+      $('drop-t').textContent = `Reading ${rec.name}…`;
+      $('drop-s').textContent = 'Checking the slides render';
+      const deck = await openDeck(rec); // validates the file before we keep it
+      rec.slides = deck.count;
+      rec.cover = await makeCover(deck, rec.kind);
+      deck.destroy();
+      rec.added = Date.now();
+      await DB.put(rec);
+      toast(`${rec.name} added · ${rec.slides} slide${rec.slides === 1 ? '' : 's'}`);
+    }
+  } catch (e) {
+    toast(e.message && !/^\w+Error$/.test(e.name || '') ? e.message : 'Could not read that file', true);
+    console.error(e);
+  } finally {
+    drop.classList.remove('busy');
+    $('drop-t').textContent = 'Drop your presentation here';
+    $('drop-s').textContent = 'or click to choose a file';
+    $('file').value = '';
+    renderLibrary();
+  }
+}
+
+$('file').addEventListener('change', (e) => addFiles(e.target.files));
+const drop = $('drop');
+['dragenter', 'dragover'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave', 'drop'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', (e) => addFiles(e.dataTransfer.files));
+// Dropping anywhere on the page works too.
+window.addEventListener('dragover', (e) => e.preventDefault());
+window.addEventListener('drop', (e) => { e.preventDefault(); if (!P.deck && !drop.contains(e.target)) addFiles(e.dataTransfer.files); });
+
+// ---------- presenter ----------
+const show = $('show'), stage = $('stage');
+const P = { deck: null, rec: null, i: 0, cur: null, started: 0, timer: null, idle: null, typed: '', jumpT: null };
+
+function fit() {
+  const d = P.deck;
+  const s = Math.min(stage.clientWidth / d.w, stage.clientHeight / d.h);
+  return s;
+}
+function place(el) {
+  const s = fit();
+  el.style.width = P.deck.w + 'px';
+  el.style.height = P.deck.h + 'px';
+  el.style.transform = `translate(-50%,-50%) scale(${s})`;
+  return s;
+}
+
+async function present(id) {
+  const rec = await DB.get(id);
+  if (!rec) return;
+  show.classList.add('on');
+  stage.innerHTML = '<div class="slide in" style="width:160px;height:90px;transform:translate(-50%,-50%);background:none;box-shadow:none"><div class="spin"></div></div>';
+  enterFullscreen();
+  try {
+    P.deck = await openDeck(rec);
+  } catch (e) {
+    close();
+    return toast('Could not open this deck: ' + e.message, true);
+  }
+  P.rec = rec;
+  if (rec.slides !== P.deck.count) { rec.slides = P.deck.count; DB.put(rec).catch(() => {}); }
+  $('show-title').textContent = rec.name;
+  stage.innerHTML = '';
+  P.cur = null;
+  P.started = Date.now();
+  clearInterval(P.timer);
+  P.timer = setInterval(tickTimer, 1000);
+  tickTimer();
+  go(0, true);
+  wake();
+}
+
+let goSeq = 0;
+async function go(i, instant) {
+  const d = P.deck;
+  if (!d) return;
+  i = Math.max(0, Math.min(d.count - 1, i));
+  if (i === P.i && P.cur && !instant) return;
+  const dir = i >= P.i ? 1 : -1;
+  P.i = i;
+  const seq = ++goSeq;
+  const el = document.createElement('div');
+  el.className = 'slide';
+  const s = place(el);
+  const old = P.cur;
+  P.cur = el;
+  stage.appendChild(el);
+  updateHud();
+  // PPTX slide nodes can only live in one place: leave a copy in the outgoing slide so it can still fade out.
+  if (old && old._idx !== undefined) {
+    const n = old.firstElementChild;
+    if (n && P.rec.kind === 'pptx') old.replaceChild(cloneWithCanvas(n), n);
+    d.unmount(old._idx);
+  }
+  el._idx = i;
+  await d.mount(i, el, s * (window.devicePixelRatio || 1));
+  if (seq !== goSeq) { d.unmount(i); el.remove(); return; }
+  const sc = el.style.transform;
+  el.style.transition = 'none';
+  el.style.transform = sc.replace(/scale\(([^)]+)\)/, (m, v) => `translateX(${dir * 24}px) scale(${v})`);
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    el.style.transition = instant ? 'none' : '';
+    el.style.transform = sc;
+    el.classList.add('in');
+  }));
+  if (old) {
+    old.classList.remove('in');
+    setTimeout(() => old.remove(), 500);
+  }
+  [...stage.children].forEach((c) => { if (c !== el && c !== old) c.remove(); });
+}
+
+function updateHud() {
+  const d = P.deck;
+  $('count').innerHTML = `${P.i + 1} <small>/ ${d.count}</small>`;
+  $('btn-prev').disabled = P.i === 0;
+  $('btn-next').disabled = P.i === d.count - 1;
+  $('progress').style.width = `${((P.i + 1) / d.count) * 100}%`;
+  document.querySelectorAll('.th').forEach((t, k) => t.classList.toggle('cur', k === P.i));
+}
+function tickTimer() {
+  const s = Math.floor((Date.now() - P.started) / 1000);
+  $('timer').textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+$('timer').onclick = () => { P.started = Date.now(); tickTimer(); };
+
+function close() {
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  show.classList.remove('on', 'black', 'idle');
+  $('grid').classList.remove('on');
+  clearInterval(P.timer);
+  if (P.deck) { if (P.cur) P.deck.unmount(P.cur._idx); P.deck.destroy(); }
+  P.deck = null; P.cur = null; P.i = 0;
+  stage.innerHTML = '';
+  $('thumbs').innerHTML = '';
+  renderLibrary();
+}
+
+function enterFullscreen() {
+  if (!document.fullscreenElement && document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
+}
+function toggleFullscreen() {
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  else enterFullscreen();
+}
+document.addEventListener('fullscreenchange', () => {
+  $('btn-fs').innerHTML = `<i class="ti ${document.fullscreenElement ? 'ti-minimize' : 'ti-maximize'}"></i>`;
+});
+
+function toggleGrid(force) {
+  const g = $('grid');
+  const on = force ?? !g.classList.contains('on');
+  g.classList.toggle('on', on);
+  $('btn-grid').classList.toggle('on', on);
+  if (!on) return;
+  $('grid-title').textContent = `${P.rec.name} · ${P.deck.count} slides`;
+  const thumbs = $('thumbs');
+  if (!thumbs.children.length) {
+    const d = P.deck;
+    thumbs.innerHTML = Array.from({ length: d.count }, (_, k) => `<div class="th" data-i="${k}"><div class="box" style="aspect-ratio:${d.w}/${d.h}"></div>${k + 1}</div>`).join('');
+    thumbs.querySelectorAll('.th').forEach((t) => {
+      const k = Number(t.dataset.i);
+      const box = t.querySelector('.box');
+      const inner = document.createElement('div');
+      inner.style.width = d.w + 'px'; inner.style.height = d.h + 'px';
+      box.appendChild(inner);
+      d.thumb(k, inner);
+      t.onclick = () => { toggleGrid(false); go(k); };
+    });
+  }
+  sizeThumbs();
+  updateHud();
+  thumbs.querySelector('.th.cur')?.scrollIntoView({ block: 'center' });
+}
+function sizeThumbs() {
+  document.querySelectorAll('.th .box').forEach((box) => {
+    const inner = box.firstElementChild;
+    if (inner) inner.style.transform = `scale(${box.clientWidth / P.deck.w})`;
+  });
+}
+
+function toggleBlack() { show.classList.toggle('black'); $('btn-black').classList.toggle('on', show.classList.contains('black')); }
+
+// Controls fade away while the mouse is still.
+function wake() {
+  show.classList.remove('idle');
+  clearTimeout(P.idle);
+  P.idle = setTimeout(() => { if (!$('grid').classList.contains('on')) show.classList.add('idle'); }, 2600);
+}
+show.addEventListener('mousemove', wake);
+show.addEventListener('touchstart', wake, { passive: true });
+
+$('btn-prev').onclick = () => go(P.i - 1);
+$('btn-next').onclick = () => go(P.i + 1);
+$('btn-grid').onclick = () => toggleGrid();
+$('grid-close').onclick = () => toggleGrid(false);
+$('btn-black').onclick = toggleBlack;
+$('btn-fs').onclick = toggleFullscreen;
+$('btn-close').onclick = close;
+$('hit-l').onclick = () => go(P.i - 1);
+$('hit-r').onclick = () => go(P.i + 1);
+
+// Swipe on touch screens.
+let tx0 = null;
+show.addEventListener('touchstart', (e) => { tx0 = e.touches.length === 1 ? e.touches[0].clientX : null; }, { passive: true });
+show.addEventListener('touchend', (e) => {
+  if (tx0 === null || $('grid').classList.contains('on')) return;
+  const dx = e.changedTouches[0].clientX - tx0;
+  if (Math.abs(dx) > 50) go(P.i + (dx < 0 ? 1 : -1));
+  tx0 = null;
+});
+
+document.addEventListener('keydown', (e) => {
+  if (!P.deck || e.metaKey || e.ctrlKey || e.altKey) return;
+  const k = e.key;
+  const grid = $('grid').classList.contains('on');
+  if (/^[0-9]$/.test(k)) {
+    P.typed = (P.typed + k).slice(-4);
+    $('jump').textContent = P.typed; $('jump').classList.add('on');
+    clearTimeout(P.jumpT); P.jumpT = setTimeout(() => { P.typed = ''; $('jump').classList.remove('on'); }, 1800);
+    return;
+  }
+  if (k === 'Enter' && P.typed) { go(Number(P.typed) - 1); P.typed = ''; $('jump').classList.remove('on'); e.preventDefault(); return; }
+  const next = ['ArrowRight', 'ArrowDown', 'PageDown', ' ', 'Enter', 'n', 'N'];
+  const prev = ['ArrowLeft', 'ArrowUp', 'PageUp', 'Backspace', 'p', 'P'];
+  if (show.classList.contains('black') && k !== 'b' && k !== 'B' && k !== '.') { toggleBlack(); e.preventDefault(); return; }
+  if (next.includes(k) && !grid) { go(P.i + 1); e.preventDefault(); }
+  else if (prev.includes(k) && !grid) { go(P.i - 1); e.preventDefault(); }
+  else if (k === 'Home') go(0);
+  else if (k === 'End') go(P.deck.count - 1);
+  else if (k === 'f' || k === 'F') toggleFullscreen();
+  else if (k === 'g' || k === 'G' || k === 'o' || k === 'O') toggleGrid();
+  else if (k === 'b' || k === 'B' || k === '.') toggleBlack();
+  else if (k === 'Escape') { if (grid) toggleGrid(false); else close(); }
+  else return;
+  wake();
+});
+
+let rz;
+window.addEventListener('resize', () => {
+  if (!P.deck) return;
+  clearTimeout(rz);
+  rz = setTimeout(() => {
+    if (P.cur) {
+      place(P.cur);
+      // PDF pages are drawn for the screen size, so redraw them crisply after a resize.
+      if (P.rec.kind === 'pdf') go(P.i, true);
+    }
+    if ($('grid').classList.contains('on')) sizeThumbs();
+  }, 120);
+});
+
+renderLibrary();
+</script>
+</body>
+</html>
