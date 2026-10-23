@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>LaundryLoop</title>
+<meta name="theme-color" content="#FFFFFF">
+<script>(function(){try{var t=localStorage.getItem('ll_theme');if(t&&t!=='auto')document.documentElement.dataset.theme=t}catch(e){}})();</script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body class="phone">
+<div class="frame">
+  <div class="notch"></div>
+  <div class="statusbar"><span id="clock"></span><span class="brandmark"><i class="ti ti-refresh"></i>LaundryLoop</span><span class="live-dot off" id="live">Offline</span></div>
+  <div class="view" id="view"><div class="skel-stack"><div class="skel" style="height:52px"></div><div class="skel" style="height:160px"></div><div class="skel" style="height:74px"></div><div class="skel" style="height:74px"></div></div></div>
+  <div class="cta hidden" id="cta"></div>
+  <nav class="navbar" id="nav">
+    <button class="navitem" data-go="home"><i class="ti ti-home"></i>Home</button>
+    <button class="navitem" data-go="orders"><i class="ti ti-map-pin"></i>Orders</button>
+    <button class="navitem" data-go="book"><i class="ti ti-plus"></i>Book</button>
+    <button class="navitem" data-go="profile"><i class="ti ti-user"></i>Profile</button>
+  </nav>
+</div>
+
+<script src="/common.js"></script>
+<script>
+const { esc, rupee, fmtSlot, fmtTime, fmtDay, STATUS } = LL;
+const view = document.getElementById('view');
+const cta = document.getElementById('cta');
+const S = { me: null, orders: [], unread: 0, services: [], providers: [], addresses: [], slots: null, book: null, rating: 0 };
+
+const ACTIVE = (o) => !['delivered', 'cancelled'].includes(o.status);
+const HEADLINE = {
+  booked: 'Finding a provider near you',
+  accepted: 'Pickup is scheduled',
+  picked_up: 'Your clothes are on the way to the laundry',
+  at_provider: 'Your clothes are at the laundry',
+  washing: 'Your laundry is being washed',
+  drying: 'Your laundry is drying',
+  ironing: 'Your laundry is being ironed',
+  ready: 'Your laundry is ready',
+  out_for_delivery: 'On its way back to you',
+};
+
+// ---------- data ----------
+async function loadOrders() { S.orders = await LL.api('/api/orders'); }
+async function loadUnread() { S.unread = (await LL.api('/api/notifications')).unread; }
+
+// ---------- router ----------
+function go(route) { location.hash = route; }
+function current() { return (location.hash.slice(1) || 'home').split('/'); }
+async function render() {
+  const [name, arg] = current();
+  const screens = { home, orders, book, track, providers, profile, notifications, confirm: confirmed };
+  const fn = screens[name] || home;
+  cta.classList.add('hidden');
+  document.querySelectorAll('#nav .navitem').forEach((b) => {
+    const tab = { track: 'orders', confirm: 'book', notifications: 'home', providers: 'home' }[name] || name;
+    b.classList.toggle('on', b.dataset.go === tab);
+  });
+  try { await fn(arg); }
+  catch (e) { view.innerHTML = `<div class="empty-note"><i class="ti ti-alert-triangle"></i>${esc(e.message)}</div>`; }
+}
+window.addEventListener('hashchange', () => {
+  view.scrollTop = 0;
+  view.classList.remove('enter');
+  void view.offsetWidth;
+  view.classList.add('enter');
+  render();
+});
+document.querySelectorAll('#nav .navitem').forEach((b) => (b.onclick = () => go(b.dataset.go)));
+
+function header(title, back = 'home', right = '') {
+  return `<div class="screen-header"><button class="back" onclick="history.length > 1 ? history.back() : go('${back}')" aria-label="Back"><i class="ti ti-arrow-left"></i></button><p class="t">${esc(title)}</p>${right}</div>`;
+}
+
+function orderCard(o) {
+  const st = STATUS[o.status];
+  const tone = { sage: 'sage', red: 'red', amber: 'amber' }[st.tone] || 'blue';
+  const when = o.needs_reschedule ? 'Missed visit · choose a new slot'
+    : o.status === 'delivered' ? `Delivered ${fmtTime(o.delivered_at || o.updated_at)}`
+    : o.status === 'cancelled' ? 'Cancelled'
+    : ['booked', 'accepted'].includes(o.status) ? `${st.label} · pickup ${fmtSlot(o.pickup_date, o.pickup_slot)}`
+    : `${st.label} · due ${fmtDay(o.delivery_date)}`;
+  return `<div class="order-card" onclick="go('track/${o.id}')">
+    <div class="icon-wrap ${tone}"><i class="ti ${st.icon}"></i></div>
+    <div class="meta"><p class="t1">${esc(o.code)} · ${esc(o.service_name)}</p><p class="t2">${esc(when)}</p></div>
+    <i class="ti ti-chevron-right chev"></i></div>`;
+}
+
+// ---------- screens ----------
+// Start a booking with a service already chosen.
+function bookService(id) {
+  S.book = { ...(S.book || {}), service_id: id };
+  go('book');
+}
+
+// One line saying where the order is and who has it.
+function whereNow(o) {
+  if (o.needs_reschedule) return `Missed ${o.needs_reschedule}. Choose a new slot`;
+  switch (o.status) {
+    case 'booked': return 'Waiting for a laundry to accept';
+    case 'accepted': return o.pickup_rider_name ? `${o.pickup_rider_name} is coming to pick up` : `${o.provider_name} accepted · finding a rider`;
+    case 'picked_up': return `${o.pickup_rider_name || 'Rider'} is taking it to ${o.provider_name}`;
+    case 'at_provider': return `At ${o.provider_name}`;
+    case 'washing': case 'drying': case 'ironing': return `${STATUS[o.status].label} at ${o.provider_name}`;
+    case 'ready': return o.delivery_rider_name ? `Ready · ${o.delivery_rider_name} will bring it` : 'Ready · finding a rider';
+    case 'out_for_delivery': return `${o.delivery_rider_name || 'Rider'} is on the way to you`;
+    default: return STATUS[o.status].label;
+  }
+}
+
+async function home() {
+  const [, , addresses, services] = await Promise.all([loadOrders(), loadUnread(), LL.api('/api/addresses'), LL.api('/api/services')]);
+  S.services = services;
+  const active = S.orders.filter(ACTIVE);
+  const addr = addresses[0];
+
+  const current = active.map((o) => {
+    const when = ['booked', 'accepted'].includes(o.status)
+      ? `Pickup ${fmtSlot(o.pickup_date, o.pickup_slot)}`
+      : `Back ${fmtSlot(o.delivery_date, o.delivery_slot)}`;
+    const code = o.status === 'accepted' && o.pickup_otp ? `Pickup code <b>${esc(o.pickup_otp)}</b>`
+      : ['ready', 'out_for_delivery'].includes(o.status) && o.delivery_otp ? `Delivery code <b>${esc(o.delivery_otp)}</b>` : '';
+    return `<div class="status-hero">
+      <p class="eyebrow"><b style="color:var(--ink);">${esc(o.code)}</b>${LL.statusChip(o.status)}<span style="margin-left:auto;">${esc(o.service_name)}</span></p>
+      <p class="headline">${esc(whereNow(o))}</p>
+      <p class="sub">${esc(when)}${code ? ` · ${code}` : ''}</p>
+      <div class="bar-track"><div class="bar-fill" style="width:${Math.max(4, o.progress * 100)}%"></div></div>
+      <div class="row"><button class="btn primary small" onclick="go('track/${o.id}')">Track order</button>
+        ${o.needs_reschedule ? `<button class="btn ghost small" onclick="go('track/${o.id}')">Reschedule</button>` : ''}</div>
+    </div>`;
+  }).join('');
+
+  view.innerHTML = `
+    <div class="home-header">
+      <button class="addr-pick" onclick="go('profile')">
+        <div class="k">Pickup from</div>
+        <div class="v">${addr ? `${esc(addr.line1)}, ${esc(addr.area)}` : 'Add your address'} <i class="ti ti-chevron-down"></i></div>
+      </button>
+      <button class="icon-btn" onclick="go('notifications')" aria-label="Notifications"><i class="ti ti-bell"></i>${S.unread ? '<span class="dot"></span>' : ''}</button>
+    </div>
+    ${current || `<div class="status-hero empty">
+      <p class="headline">No laundry in progress</p>
+      <p class="sub">We pick up, a verified local laundry washes it, and we bring it back in your slot.</p>
+      <div class="row"><button class="btn primary small" onclick="go('book')">Book a pickup</button></div>
+    </div>`}
+    <p class="section-label">Services</p>
+    <div class="svc-grid">
+      ${services.map((s) => `<button class="svc" onclick="bookService(${s.id})"><b>${esc(s.name)}</b>
+        <span>${esc(s.description || '')}</span><div class="price">₹${s.price_per_kg}<small>/kg</small></div></button>`).join('')}
+    </div>
+    <p class="muted" style="font-size:12px; margin:8px 0 0;">Pickup &amp; delivery ₹${LL.config.deliveryFee}, free above ₹${LL.config.freeDeliveryAbove}. Pay cash or UPI on delivery.</p>
+    <p class="section-label">Your orders ${S.orders.length > 4 ? `<a href="#orders/past">See all</a>` : ''}</p>
+    ${S.orders.filter((o) => !ACTIVE(o)).slice(0, 4).map(orderCard).join('') || '<div class="empty-note">Past orders will show up here.</div>'}`;
+}
+
+async function orders(filter) {
+  await loadOrders();
+  const f = filter || 'active';
+  const list = S.orders.filter((o) => (f === 'active' ? ACTIVE(o) : !ACTIVE(o)));
+  view.innerHTML = `${header('My orders')}
+    <div class="pill-row" style="margin-top:12px;">
+      <button class="pill ${f === 'active' ? 'sel' : ''}" onclick="go('orders/active')">In progress (${S.orders.filter(ACTIVE).length})</button>
+      <button class="pill ${f === 'past' ? 'sel' : ''}" onclick="go('orders/past')">Past (${S.orders.filter((o) => !ACTIVE(o)).length})</button>
+    </div>
+    <div style="margin-top:14px;">${list.length ? list.map(orderCard).join('')
+      : `<div class="empty-note"><i class="ti ti-basket"></i>${f === 'active' ? 'Nothing in progress right now.' : 'No past orders yet.'}<br><br><button class="btn primary small" onclick="go('book')">Book a pickup</button></div>`}</div>`;
+}
+
+async function book() {
+  const [services, slots, providers, addresses] = await Promise.all([
+    LL.api('/api/services'), LL.api('/api/slots'), LL.api('/api/providers'), LL.api('/api/addresses'),
+  ]);
+  Object.assign(S, { services, slots, providers, addresses });
+  const b = S.book || {};
+  const firstPickup = slots.pickupDates[0];
+  S.book = {
+    service_id: services.some((s) => s.id === b.service_id) ? b.service_id : services[0]?.id,
+    est_kg: b.est_kg || 3,
+    pickup_date: slots.pickupDates.some((d) => d.date === b.pickup_date) ? b.pickup_date : firstPickup?.date,
+    pickup_slot: b.pickup_slot,
+    delivery_date: b.delivery_date,
+    delivery_slot: b.delivery_slot || '16-18',
+    provider_id: b.provider_id ?? null,
+    address_id: addresses.some((a) => a.id === b.address_id) ? b.address_id : addresses[0]?.id,
+    notes: b.notes || '',
+    adding: !addresses.length,
+  };
+  drawBook();
+}
+
+function drawBook() {
+  const b = S.book;
+  const pd = S.slots.pickupDates.find((d) => d.date === b.pickup_date);
+  if (!pd?.slots.includes(b.pickup_slot)) b.pickup_slot = pd?.slots[pd.slots.includes('16-18') ? pd.slots.indexOf('16-18') : 0];
+  const deliveryDates = [1, 2, 3, 4].map((n) => LL.addDays(b.pickup_date, n));
+  if (!deliveryDates.includes(b.delivery_date)) b.delivery_date = deliveryDates[0];
+  const svc = S.services.find((s) => s.id === b.service_id);
+  const est = svc ? Math.round(svc.price_per_kg * b.est_kg) : 0;
+  const fee = est >= LL.config.freeDeliveryAbove ? 0 : LL.config.deliveryFee;
+  const pill = (sel, onclick, html, disabled = false) => `<button class="pill ${sel ? 'sel' : ''}" ${disabled ? 'disabled' : ''} onclick="${onclick}">${html}</button>`;
+
+  view.innerHTML = `${header('New order')}
+    <p class="lead">Choose a slot and we'll match you with a nearby verified laundry and a delivery partner. The final price is set when your clothes are weighed at the laundry.</p>
+
+    <div class="field-block"><p class="fl">Service</p><div class="pill-row">
+      ${S.services.map((s) => pill(s.id === b.service_id, `setBook('service_id', ${s.id})`, `${esc(s.name)} <small>₹${s.price_per_kg}/kg</small>`)).join('')}
+    </div></div>
+
+    <div class="field-block"><p class="fl">Estimated weight</p>
+      <div class="stepper-input">
+        <button onclick="setBook('est_kg', Math.max(1, S.book.est_kg - 1))" aria-label="Less">−</button>
+        <span class="val">${b.est_kg} kg</span>
+        <button onclick="setBook('est_kg', Math.min(30, S.book.est_kg + 1))" aria-label="More">+</button>
+        <span class="muted" style="font-size:11.5px;">≈ ${b.est_kg * 4} shirts</span>
+      </div>
+    </div>
+
+    <div class="field-block"><p class="fl">Pickup date</p><div class="pill-row">
+      ${S.slots.pickupDates.length ? S.slots.pickupDates.map((d) => pill(d.date === b.pickup_date, `setBook('pickup_date', '${d.date}')`, esc(fmtDay(d.date)))).join('') : '<span class="muted">No pickup slots available.</span>'}
+    </div></div>
+
+    <div class="field-block"><p class="fl">Pickup slot</p><div class="pill-row">
+      ${S.slots.slots.map((s) => pill(s.id === b.pickup_slot, `setBook('pickup_slot', '${s.id}')`, esc(s.label), !pd?.slots.includes(s.id))).join('')}
+    </div></div>
+
+    <div class="field-block"><p class="fl">Delivery back</p><div class="pill-row">
+      ${deliveryDates.map((d) => pill(d === b.delivery_date, `setBook('delivery_date', '${d}')`, esc(fmtDay(d)))).join('')}
+    </div><div class="pill-row" style="margin-top:8px;">
+      ${S.slots.slots.map((s) => pill(s.id === b.delivery_slot, `setBook('delivery_slot', '${s.id}')`, esc(s.label))).join('')}
+    </div></div>
+
+    <div class="field-block"><p class="fl">Provider</p><div class="pill-row">
+      ${pill(b.provider_id === null, `setBook('provider_id', null)`, 'Any nearby <small>fastest</small>')}
+      ${S.providers.filter((p) => p.accepting).map((p) => pill(b.provider_id === p.id, `setBook('provider_id', ${p.id})`, `${esc(p.business_name)} <small>${p.rating ? p.rating + '★' : 'new'}</small>`)).join('')}
+    </div></div>
+
+    <div class="field-block"><p class="fl">Pickup address</p>
+      ${S.addresses.map((a) => `<div class="addr-row ${a.id === b.address_id ? 'sel' : ''}" onclick="setBook('address_id', ${a.id})">
+        <i class="ti ti-map-pin"></i><div><p class="t">${esc(a.label)} · ${esc(a.line1)}</p><p class="s">${esc(a.area)}, ${esc(a.city)}</p></div><span class="radio"></span></div>`).join('')}
+      ${b.adding ? `<div class="card" style="margin-top:8px;"><div class="form-grid" id="addr-form">
+          <div class="row2"><input class="input" name="label" placeholder="Label (Home, Hostel)"><input class="input" name="area" placeholder="Area, e.g. Wadala"></div>
+          <input class="input" name="line1" placeholder="Flat / room, building, street">
+          <input class="input" name="city" placeholder="City" value="Mumbai">
+          <div class="btn-row" style="margin-top:0;">${S.addresses.length ? `<button class="btn ghost small" onclick="setBook('adding', false)">Cancel</button>` : ''}<button class="btn primary small" onclick="saveAddress(this)">Save address</button></div>
+        </div></div>`
+        : `<button class="btn ghost small" style="margin-top:8px;" onclick="setBook('adding', true)"><i class="ti ti-plus"></i>Add address</button>`}
+    </div>
+
+    <div class="field-block"><p class="fl">Notes for the provider (optional)</p>
+      <textarea class="input" id="notes" placeholder="e.g. 2 silk kurtas, wash separately" oninput="S.book.notes = this.value">${esc(b.notes)}</textarea>
+    </div>
+
+    <div class="price-row"><span class="t">Estimated total<br><small>${b.est_kg} kg × ₹${svc?.price_per_kg ?? 0}/kg ${fee ? `+ ₹${fee} pickup &amp; delivery` : '· free pickup &amp; delivery'}</small></span><span class="p">${rupee(est + fee)}</span></div>
+    <p class="muted" style="font-size:11.5px; margin:6px 0 0;">${fee ? `Free pickup &amp; delivery on orders above ${rupee(LL.config.freeDeliveryAbove)}. ` : ''}Pay by cash or UPI when your laundry comes back.</p>`;
+
+  cta.classList.remove('hidden');
+  cta.innerHTML = `<button class="btn primary block" id="confirm-btn" ${!b.address_id || !b.pickup_slot ? 'disabled' : ''}>Confirm pickup · ${rupee(est + fee)}</button>`;
+  document.getElementById('confirm-btn').onclick = (e) => placeOrder(e.currentTarget);
+}
+
+function setBook(key, value) {
+  const top = view.scrollTop;
+  S.book[key] = value;
+  drawBook();
+  view.scrollTop = top;
+}
+
+async function saveAddress(btn) {
+  const f = document.getElementById('addr-form');
+  const body = Object.fromEntries([...f.querySelectorAll('input')].map((i) => [i.name, i.value]));
+  await LL.busy(btn, async () => {
+    const a = await LL.api('/api/addresses', { method: 'POST', body });
+    S.addresses.push(a);
+    S.book.address_id = a.id;
+    S.book.adding = false;
+    drawBook();
+    LL.toast('Address saved');
+  });
+}
+
+async function placeOrder(btn) {
+  await LL.busy(btn, async () => {
+    const o = await LL.api('/api/orders', { method: 'POST', body: S.book });
+    S.book = null;
+    go('confirm/' + o.id);
+  });
+}
+
+async function confirmed(id) {
+  const o = await LL.api('/api/orders/' + id);
+  view.innerHTML = `<div class="confirm-wrap">
+    <div class="check"><i class="ti ti-check"></i></div>
+    <p class="t">Pickup booked</p>
+    <p class="s">Order <b>${esc(o.code)}</b>. ${o.preferred_provider_name ? esc(o.preferred_provider_name) + ' has been asked to accept it.' : "We've sent it to verified providers near you."} We'll notify you when it's accepted.<br>Pickup ${esc(fmtSlot(o.pickup_date, o.pickup_slot))}.</p>
+    <button class="btn primary" style="width:200px;" onclick="go('track/${o.id}')">Track this order</button>
+    <button class="btn ghost" style="width:200px; margin-top:8px;" onclick="go('home')">Back to home</button>
+  </div>`;
+}
+
+let riderRefresh;
+async function track(id) {
+  if (!id) return go('orders');
+  clearInterval(riderRefresh);
+  const o = await LL.api('/api/orders/' + id);
+  S.rating = S.rating && S.ratingFor === o.id ? S.rating : 0;
+  S.ratingFor = o.id;
+  const kg = o.actual_kg ? `${o.actual_kg} kg` : `~${o.est_kg} kg`;
+  const call = (phone, label) => (phone ? `<a class="icon-btn call" href="tel:${esc(phone)}" aria-label="${label}"><i class="ti ti-phone"></i></a>` : '');
+
+  // The delivery partner currently heading to the customer, if any.
+  const legRider = o.status === 'accepted' && o.pickup_rider_name ? 'pickup' : o.status === 'out_for_delivery' && o.delivery_rider_name ? 'delivery' : null;
+  let riderCard = '';
+  if (legRider) {
+    const lat = o[`${legRider}_rider_lat`];
+    const at = o[`${legRider}_rider_location_at`];
+    riderCard = `<div class="order-card static" style="margin-top:16px; border-color:var(--blue);">
+      <div class="icon-wrap blue"><i class="ti ti-motorbike"></i></div>
+      <div class="meta"><p class="t1">${esc(o[`${legRider}_rider_name`])} · ${legRider === 'pickup' ? 'coming to pick up' : 'bringing your laundry'}</p>
+        <p class="t2">${esc(o[`${legRider}_rider_vehicle`] || 'Delivery partner')}</p>
+        ${lat != null ? `<p class="rider-line"><span class="live-dot"></span>Location ${esc(LL.ago(at))} · <a href="${LL.pinLink(lat, o[`${legRider}_rider_lng`])}" target="_blank" rel="noopener">See on map</a></p>` : ''}</div>
+      ${call(o[`${legRider}_rider_phone`], 'Call delivery partner')}
+    </div>`;
+    // Rider location is not part of the change stamp, so refresh it while they're on the way.
+    riderRefresh = setInterval(() => { if (current()[0] === 'track' && Number(current()[1]) === o.id) track(o.id); else clearInterval(riderRefresh); }, 20000);
+  }
+
+  // Codes the customer reads out to the rider.
+  let codeBox = '';
+  if (o.pickup_otp && o.status !== 'booked') {
+    codeBox = `<div class="otp-box"><div class="code">${esc(o.pickup_otp)}</div><div class="lbl">Pickup code<br>Share it with the delivery partner only when you hand over your clothes.</div></div>`;
+  } else if (o.delivery_otp) {
+    codeBox = `<div class="otp-box"><div class="code">${esc(o.delivery_otp)}</div><div class="lbl">Delivery code<br>Share it only after you've checked your laundry. Amount due ${o.payment_status === 'paid' ? 'paid' : rupee(o.total)}.</div></div>`;
+  }
+
+  // Missed visit, or the customer wants a different slot.
+  const reLeg = o.needs_reschedule || (['booked', 'accepted'].includes(o.status) ? 'pickup' : ['picked_up', 'at_provider', 'washing', 'drying', 'ironing', 'ready'].includes(o.status) ? 'delivery' : null);
+  let reschedule = '';
+  if (o.needs_reschedule) {
+    reschedule = `<div class="banner red"><i class="ti ti-calendar-x"></i><div><b>We missed you</b><br>${o.needs_reschedule === 'pickup' ? 'Our delivery partner could not pick up your clothes.' : 'Our delivery partner could not deliver, so your laundry is back safely at the laundry.'} Choose a new slot below.</div></div>
+      ${await rescheduleForm(o, reLeg)}`;
+  } else if (reLeg && S.reschedOpen === o.id) {
+    reschedule = await rescheduleForm(o, reLeg);
+  }
+
+  const providerCard = o.provider_name ? `
+    <div class="order-card static" style="margin-top:12px;">
+      <div class="icon-wrap terracotta round">${esc(LL.initials(o.provider_name))}</div>
+      <div class="meta"><p class="t1">${esc(o.provider_name)}</p><p class="t2">Verified laundry · ${esc(o.provider_contact || '')}</p></div>
+      ${call(o.provider_phone, 'Call provider')}
+    </div>` : o.status === 'booked' ? `<div class="banner amber"><i class="ti ti-clock"></i><div>${o.preferred_provider_name ? `Waiting for <b>${esc(o.preferred_provider_name)}</b> to accept.` : 'Waiting for a nearby provider to accept.'} You'll get a notification the moment someone does.</div></div>` : '';
+
+  let actions = '';
+  if (['booked', 'accepted'].includes(o.status)) {
+    actions = `<button class="btn danger block" style="margin-top:18px;" onclick="cancelOrder(${o.id}, this)"><i class="ti ti-x"></i>Cancel order</button>`;
+  }
+  if (reLeg && !o.needs_reschedule && S.reschedOpen !== o.id) {
+    actions = `<button class="btn ghost block" style="margin-top:18px;" onclick="S.reschedOpen=${o.id}; track(${o.id})"><i class="ti ti-calendar"></i>Change ${reLeg} slot</button>` + actions;
+  }
+  if (o.status === 'delivered' && !o.rating) {
+    actions = `<div class="card" style="margin-top:18px;">
+      <p class="t1" style="font-weight:700; margin:0 0 8px;">How did ${esc(o.provider_name)} do?</p>
+      <div class="stars">${[1, 2, 3, 4, 5].map((n) => `<button class="${n <= S.rating ? 'on' : ''}" onclick="S.rating=${n}; track(${o.id})" aria-label="${n} stars"><i class="ti ti-star-filled"></i></button>`).join('')}</div>
+      <textarea class="input" id="review" placeholder="Anything to add? (optional)" style="margin-top:10px;" oninput="S.review = this.value">${esc(S.review || "")}</textarea>
+      <button class="btn primary block" style="margin-top:10px;" ${S.rating ? '' : 'disabled'} onclick="rate(${o.id}, this)">Submit rating</button>
+    </div>`;
+  } else if (o.rating) {
+    actions = `<div class="banner sage"><i class="ti ti-star-filled"></i><div>You rated this ${o.rating}★${o.review ? ` · “${esc(o.review)}”` : ''}</div></div>`;
+  }
+
+  // Problems: anything after pickup can be reported to support.
+  const issues = (o.issues || []).map((i) => `<div class="banner ${i.status === 'open' ? 'amber' : 'sage'}"><i class="ti ${i.status === 'open' ? 'ti-message-report' : 'ti-circle-check'}"></i>
+    <div><b>${esc(LL.config.issueTypes[i.type] || i.type)}</b> · ${i.status === 'open' ? 'support is looking into it' : 'resolved'}<br>${esc(i.description || '')}
+    ${i.resolution ? `<br><b>Resolution:</b> ${esc(i.resolution)}${i.refund_amount ? ` · refund ${rupee(i.refund_amount)}` : ''}` : ''}</div></div>`).join('');
+  let report = '';
+  if (!['booked', 'accepted', 'cancelled'].includes(o.status)) {
+    report = S.reportOpen === o.id ? `<div class="card" style="margin-top:14px;">
+        <p class="t1" style="font-weight:700; margin:0 0 8px;">Report a problem</p>
+        <select class="input" id="issue-type">${Object.entries(LL.config.issueTypes).filter(([k]) => k !== 'item_mismatch').map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('')}</select>
+        <textarea class="input" id="issue-desc" style="margin-top:8px;" placeholder="What happened? e.g. one blue shirt missing"></textarea>
+        <div class="btn-row"><button class="btn ghost small" onclick="S.reportOpen=null; track(${o.id})">Cancel</button><button class="btn primary small" onclick="reportIssue(${o.id}, this)">Send to support</button></div>
+      </div>`
+      : `<button class="btn ghost block" style="margin-top:10px;" onclick="S.reportOpen=${o.id}; track(${o.id})"><i class="ti ti-message-report"></i>Report a problem</button>`;
+  }
+
+  view.innerHTML = `${header(o.code, 'orders', LL.statusChip(o.status))}
+    <p class="lead">${esc(o.service_name)} · ${kg}${o.items_count ? ` · ${o.items_received ?? o.items_count} items` : ''} · booked ${esc(fmtTime(o.created_at))}</p>
+    ${reschedule}
+    ${codeBox}
+    ${riderCard}
+    ${LL.stepperHtml(o)}
+    ${providerCard}
+    <div class="card" style="margin-top:12px;">
+      <div class="kv"><span class="k">Pickup</span><span class="v">${esc(fmtSlot(o.pickup_date, o.pickup_slot))}</span></div>
+      <div class="kv"><span class="k">Delivery</span><span class="v">${esc(fmtSlot(o.delivery_date, o.delivery_slot))}</span></div>
+      <div class="kv"><span class="k">Address</span><span class="v">${esc(o.address_text)}</span></div>
+      ${o.notes ? `<div class="kv"><span class="k">Notes</span><span class="v">${esc(o.notes)}</span></div>` : ''}
+      <div class="kv"><span class="k">${o.final_price != null ? 'Laundry' : 'Laundry (estimate)'}</span><span class="v">${rupee(o.laundry_price)}${o.final_price != null ? ` <small class="muted">(${o.actual_kg} kg × ₹${o.price_per_kg})</small>` : ''}</span></div>
+      <div class="kv"><span class="k">Pickup &amp; delivery</span><span class="v">${o.delivery_fee ? rupee(o.delivery_fee) : 'Free'}</span></div>
+      <div class="kv"><span class="k"><b>Total</b></span><span class="v">${rupee(o.total)}</span></div>
+      <div class="kv"><span class="k">Payment</span><span class="v">${o.payment_status === 'paid' ? `<span class="chip sage">Paid · ${esc((o.payment_method || '').toUpperCase())}</span>` : '<span class="chip grey">Cash or UPI at delivery</span>'}</span></div>
+    </div>
+    ${issues}
+    ${actions}
+    ${report}`;
+}
+
+async function rescheduleForm(o, leg) {
+  if (!S.slots) S.slots = await LL.api('/api/slots');
+  const r = S.resched && S.resched.id === o.id && S.resched.leg === leg ? S.resched : (S.resched = { id: o.id, leg, date: null, slot: null });
+  // Pickup: the usual pickup days. Delivery: today up to five days ahead.
+  const days = leg === 'pickup'
+    ? S.slots.pickupDates
+    : [0, 1, 2, 3, 4, 5].map((n) => LL.addDays(LL.localDate(), n)).map((date) => ({
+      date, slots: S.slots.slots.filter((s) => date !== LL.localDate() || s.start > new Date().getHours()).map((s) => s.id) }))
+      .filter((d) => d.slots.length);
+  if (!days.some((d) => d.date === r.date)) r.date = days[0]?.date;
+  const day = days.find((d) => d.date === r.date);
+  if (!day?.slots.includes(r.slot)) r.slot = day?.slots[0];
+  const pill = (sel, onclick, html, dis) => `<button class="pill ${sel ? 'sel' : ''}" ${dis ? 'disabled' : ''} onclick="${onclick}">${html}</button>`;
+  return `<div class="card" style="margin-top:12px;">
+    <p class="t1" style="font-weight:700; margin:0 0 8px;">New ${leg} slot</p>
+    <div class="pill-row">${days.map((d) => pill(d.date === r.date, `S.resched.date='${d.date}'; track(${o.id})`, esc(fmtDay(d.date)))).join('')}</div>
+    <div class="pill-row" style="margin-top:8px;">${S.slots.slots.map((s) => pill(s.id === r.slot, `S.resched.slot='${s.id}'; track(${o.id})`, esc(s.label), !day?.slots.includes(s.id))).join('')}</div>
+    <div class="btn-row">${o.needs_reschedule ? '' : `<button class="btn ghost small" onclick="S.reschedOpen=null; track(${o.id})">Cancel</button>`}
+      <button class="btn primary small" onclick="reschedule(${o.id}, this)">Confirm new slot</button></div>
+  </div>`;
+}
+
+async function reschedule(id, btn) {
+  await LL.busy(btn, async () => {
+    await LL.api(`/api/orders/${id}/reschedule`, { method: 'POST', body: { leg: S.resched.leg, date: S.resched.date, slot: S.resched.slot } });
+    S.reschedOpen = null;
+    S.resched = null;
+    LL.toast('New slot confirmed');
+    track(id);
+  });
+}
+
+async function reportIssue(id, btn) {
+  await LL.busy(btn, async () => {
+    await LL.api(`/api/orders/${id}/issues`, { method: 'POST', body: {
+      type: document.getElementById('issue-type').value, description: document.getElementById('issue-desc').value } });
+    S.reportOpen = null;
+    track(id);
+  });
+}
+
+async function cancelOrder(id, btn) {
+  if (!window.confirm('Cancel this order?')) return;
+  await LL.busy(btn, async () => {
+    await LL.api(`/api/orders/${id}/cancel`, { method: 'POST', body: {} });
+    LL.toast('Order cancelled');
+    track(id);
+  });
+}
+
+async function rate(id, btn) {
+  await LL.busy(btn, async () => {
+    await LL.api(`/api/orders/${id}/rate`, { method: 'POST', body: { rating: S.rating, review: S.review || "" } });
+    S.review = "";
+    S.rating = 0;
+    LL.toast('Thanks for the rating!');
+    track(id);
+  });
+}
+
+async function providers() {
+  const list = await LL.api('/api/providers');
+  view.innerHTML = `${header('Nearby providers')}
+    <p class="lead">Every provider is verified by the LaundryLoop team before they can take orders.</p>
+    <div style="margin-top:14px;">${list.map((p, i) => `
+      <div class="order-card static">
+        <div class="icon-wrap ${i % 2 ? 'blue' : 'sage'}"><i class="ti ti-building-store"></i></div>
+        <div class="meta"><p class="t1">${esc(p.business_name)}</p>
+          <p class="t2">${p.rating ? `${p.rating} ★ (${p.rating_count})` : 'New'} · ${esc(p.area)} · ${p.completed} orders done</p>
+          ${p.bio ? `<p class="t2" style="margin-top:3px;">${esc(p.bio)}</p>` : ''}</div>
+        ${p.accepting ? '<span class="chip sage">Open</span>' : '<span class="chip grey">Busy</span>'}
+      </div>`).join('') || '<div class="empty-note">No providers yet.</div>'}</div>`;
+}
+
+async function profile() {
+  const addresses = await LL.api('/api/addresses');
+  const done = S.orders.filter((o) => o.status === 'delivered');
+  view.innerHTML = `${header('Profile')}
+    <div class="stat-grid">
+      <div class="stat"><div class="n">${S.orders.length}</div><div class="l">Orders placed</div></div>
+      <div class="stat"><div class="n">${rupee(done.reduce((s, o) => s + (o.final_price || 0), 0))}</div><div class="l">Spent on laundry</div></div>
+    </div>
+    <p class="section-label">Your details</p>
+    <div class="form-grid" id="me-form">
+      <input class="input" name="name" value="${esc(S.me.name)}" placeholder="Name">
+      <input class="input" name="phone" value="${esc(S.me.phone || '')}" placeholder="Phone">
+      <input class="input" value="${esc(S.me.email)}" disabled>
+      <button class="btn ghost" onclick="saveMe(this)">Save changes</button>
+    </div>
+    <p class="section-label">Saved addresses</p>
+    ${addresses.map((a) => `<div class="addr-row" style="cursor:default;"><i class="ti ti-map-pin"></i>
+      <div><p class="t">${esc(a.label)} · ${esc(a.line1)}</p><p class="s">${esc(a.area)}, ${esc(a.city)}</p></div>
+      <button class="btn danger small" style="margin-left:auto;" onclick="deleteAddress(${a.id}, this)" aria-label="Delete"><i class="ti ti-trash"></i></button></div>`).join('') || '<p class="muted" style="font-size:13px;">No saved addresses. Add one when you book.</p>'}
+    <p class="section-label">Appearance</p>
+    ${LL.themePicker()}
+    <button class="btn danger block" style="margin-top:28px;" onclick="LL.logout()"><i class="ti ti-logout"></i>Sign out</button>`;
+}
+
+async function saveMe(btn) {
+  const f = document.getElementById('me-form');
+  await LL.busy(btn, async () => {
+    S.me = await LL.api('/api/me', { method: 'PATCH', body: { name: f.name.value, phone: f.phone.value } });
+    LL.toast('Saved');
+  });
+}
+async function deleteAddress(id, btn) {
+  await LL.busy(btn, async () => { await LL.api('/api/addresses/' + id, { method: 'DELETE' }); profile(); });
+}
+
+async function notifications() {
+  const { items } = await LL.api('/api/notifications');
+  view.innerHTML = `${header('Notifications')}
+    <div style="margin-top:14px;">${items.map((n) => `
+      <div class="order-card ${n.order_id ? '' : 'static'}" ${n.order_id ? `onclick="go('track/${n.order_id}')"` : ''} style="${n.read ? '' : 'border-color:var(--blue);'}">
+        <div class="icon-wrap ${n.read ? 'sage' : 'blue'}"><i class="ti ti-bell"></i></div>
+        <div class="meta"><p class="t1">${esc(n.title)}</p><p class="t2">${esc(n.body || '')}</p><p class="t2" style="margin-top:3px; font-size:11px;">${esc(LL.ago(n.created_at))}</p></div>
+      </div>`).join('') || '<div class="empty-note"><i class="ti ti-bell-off"></i>No notifications yet.</div>'}</div>`;
+  if (items.some((n) => !n.read)) { await LL.api('/api/notifications/read', { method: 'POST' }); S.unread = 0; }
+}
+
+// ---------- live ----------
+let refreshTimer;
+function onLive(msg) {
+  const [name, arg] = current();
+  if (msg.type === 'notification') {
+    LL.api('/api/notifications').then(({ items, unread }) => {
+      S.unread = unread;
+      if (items[0] && !items[0].read) LL.toast(items[0].title);
+      if (name === 'notifications' || name === 'home') render();
+    });
+  }
+  if (msg.type === 'order') {
+    // Don't wipe the booking form; refresh anything that shows order state.
+    clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(() => {
+      // Don't wipe something the customer is typing (a review or problem report).
+      if (view.contains(document.activeElement) && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
+      if (['home', 'orders', 'track'].includes(name)) render();
+    }, 150);
+  }
+}
+
+(async () => {
+  S.me = await LL.requireRole('customer');
+  LL.clock(document.getElementById('clock'));
+  LL.live(onLive, (on) => document.getElementById('live').classList.toggle('off', !on));
+  await loadOrders();
+  render();
+})();
+</script>
+</body>
+</html>

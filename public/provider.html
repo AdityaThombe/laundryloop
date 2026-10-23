@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>LaundryLoop Partner</title>
+<meta name="theme-color" content="#FFFFFF">
+<script>(function(){try{var t=localStorage.getItem('ll_theme');if(t&&t!=='auto')document.documentElement.dataset.theme=t}catch(e){}})();</script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css">
+<link rel="stylesheet" href="/styles.css">
+<style>
+  .req.direct{border-color:var(--primary); box-shadow:0 0 0 1px var(--primary);}
+</style>
+</head>
+<body class="phone">
+<div class="frame">
+  <div class="notch"></div>
+  <div class="statusbar"><span id="clock"></span><span class="brandmark"><i class="ti ti-refresh"></i>LaundryLoop</span><span class="live-dot off" id="live">Offline</span></div>
+  <div class="view" id="view"><div class="skel-stack"><div class="skel" style="height:52px"></div><div class="skel" style="height:160px"></div><div class="skel" style="height:74px"></div><div class="skel" style="height:74px"></div></div></div>
+  <nav class="navbar" id="nav">
+    <button class="navitem" data-go="requests"><i class="ti ti-inbox"></i>Requests<span class="badge hidden" id="req-badge"></span></button>
+    <button class="navitem" data-go="active"><i class="ti ti-wash-machine"></i>Active<span class="badge hidden" id="act-badge"></span></button>
+    <button class="navitem" data-go="history"><i class="ti ti-history"></i>History</button>
+    <button class="navitem" data-go="profile"><i class="ti ti-user"></i>Profile</button>
+  </nav>
+</div>
+
+<script src="/common.js"></script>
+<script>
+const { esc, rupee, fmtSlot, fmtTime, fmtDay, STATUS, ACTION } = LL;
+const view = document.getElementById('view');
+const S = { me: null, open: [], mine: [] };
+const ACTIVE = (o) => !['delivered', 'cancelled'].includes(o.status);
+const provider = () => S.me.provider;
+
+async function loadAll() {
+  [S.open, S.mine] = await Promise.all([LL.api('/api/provider/open'), LL.api('/api/orders')]);
+  const act = S.mine.filter(ACTIVE).length;
+  setBadge('req-badge', S.open.length);
+  setBadge('act-badge', act);
+}
+function setBadge(id, n) {
+  const el = document.getElementById(id);
+  el.textContent = n;
+  el.classList.toggle('hidden', !n);
+}
+
+function go(route) { location.hash = route; }
+function current() { return (location.hash.slice(1) || 'requests').split('/'); }
+async function render() {
+  const [name, arg] = current();
+  const screens = { requests, active, order, history: historyScreen, profile };
+  document.querySelectorAll('#nav .navitem').forEach((b) => b.classList.toggle('on', b.dataset.go === (name === 'order' ? 'active' : name)));
+  try { await (screens[name] || requests)(arg); }
+  catch (e) { view.innerHTML = `<div class="empty-note"><i class="ti ti-alert-triangle"></i>${esc(e.message)}</div>`; }
+}
+window.addEventListener('hashchange', () => {
+  view.scrollTop = 0;
+  view.classList.remove('enter');
+  void view.offsetWidth;
+  view.classList.add('enter');
+  render();
+});
+document.querySelectorAll('#nav .navitem').forEach((b) => (b.onclick = () => go(b.dataset.go)));
+
+function topBar(st) {
+  const p = provider();
+  return `<div class="partner-top">
+      <div class="icon-wrap terracotta round">${esc(LL.initials(p.business_name))}</div>
+      <div class="meta"><p class="t1" style="margin:0;">${esc(p.business_name)}</p><p class="t2">${esc(S.me.name)} · ${esc(p.area)}</p></div>
+      <button class="icon-btn" onclick="go('profile')" aria-label="Profile"><i class="ti ti-user"></i></button>
+    </div>
+    ${st && p.verified ? `<div class="stat-strip">
+      <div><div class="n">${rupee(st.earnings_today)}</div><div class="l">Earned today</div></div>
+      <div><div class="n">${st.active}</div><div class="l">In progress</div></div>
+      <div><div class="n">${st.rating.r ? st.rating.r + '★' : '—'}</div><div class="l">Rating</div></div>
+    </div>` : ''}
+    ${p.verified ? `<div class="switch-row ${p.accepting ? 'on' : ''}">
+        <div class="txt"><b>${p.accepting ? 'Accepting new orders' : 'Not accepting orders'}</b><span>${p.accepting ? 'Customers can pick you when booking' : 'Turn on when you have capacity'}</span></div>
+        <label class="toggle"><input type="checkbox" ${p.accepting ? 'checked' : ''} onchange="setAccepting(this.checked)"><span></span></label>
+      </div>`
+      : `<div class="banner amber"><i class="ti ti-shield-half"></i><div><b>Waiting for verification</b><br>The LaundryLoop team is reviewing your details. You'll be notified here as soon as you can start accepting orders.</div></div>`}`;
+}
+
+async function setAccepting(on) {
+  try {
+    S.me = await LL.api('/api/provider/profile', { method: 'PATCH', body: { accepting: on } });
+    LL.toast(on ? "You're accepting orders" : 'Paused new orders');
+    render();
+  } catch (e) { LL.toast(e.message, true); }
+}
+
+function requestCard(o) {
+  const direct = o.preferred_provider_id === provider().id;
+  return `<div class="req ${direct ? 'direct' : ''}">
+    <div class="top"><span class="code">${esc(o.code)}</span>${direct ? '<span class="chip navy"><i class="ti ti-star"></i>Requested you</span>' : ''}<span class="chip blue">${esc(o.service_name)}</span></div>
+    <div class="line"><i class="ti ti-map-pin"></i>${esc(o.area)} <span class="muted">· exact address after accepting</span></div>
+    <div class="line"><i class="ti ti-shopping-bag"></i>Pickup ${esc(fmtSlot(o.pickup_date, o.pickup_slot))}</div>
+    <div class="line"><i class="ti ti-truck-delivery"></i>Return ${esc(fmtSlot(o.delivery_date, o.delivery_slot))}</div>
+    <div class="line"><i class="ti ti-scale"></i>~${o.est_kg} kg · est. ${rupee(o.est_price)}</div>
+    ${o.notes ? `<div class="line"><i class="ti ti-note"></i>${esc(o.notes)}</div>` : ''}
+    <div class="card-foot">
+      <div><div class="muted" style="font-size:11px;">You earn about</div><div class="earn">${rupee(o.provider_earning)}</div></div>
+      <div style="display:flex; gap:8px;">
+        ${direct ? `<button class="btn ghost small" onclick="decline(${o.id}, this)">Decline</button>` : ''}
+        <button class="btn sage small" onclick="accept(${o.id}, this)"><i class="ti ti-check"></i>Accept</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+async function requests() {
+  const [st] = await Promise.all([LL.api('/api/provider/stats'), loadAll()]);
+  view.innerHTML = `${topBar(st)}
+    <p class="section-label">New pickup requests</p>
+    ${!provider().verified ? '<div class="empty-note"><i class="ti ti-lock"></i>Requests appear here once you are verified.</div>'
+      : S.open.length ? S.open.map(requestCard).join('')
+      : '<div class="empty-note"><i class="ti ti-inbox"></i>No open requests right now.<br>New ones appear here instantly.</div>'}`;
+}
+
+async function accept(id, btn) {
+  await LL.busy(btn, async () => {
+    await LL.api(`/api/orders/${id}/accept`, { method: 'POST' });
+    LL.toast('Order accepted');
+    go('order/' + id);
+  });
+}
+async function decline(id, btn) {
+  await LL.busy(btn, async () => {
+    await LL.api(`/api/orders/${id}/decline`, { method: 'POST' });
+    LL.toast('Declined; opened to other providers');
+    render();
+  });
+}
+
+// What the homemaker should know or do next for an order.
+function nextStep(o) {
+  const me = S.me.id;
+  if (o.status === 'accepted') {
+    if (o.needs_reschedule) return { text: 'Missed pickup · waiting for customer to reschedule', icon: 'ti-calendar-x' };
+    if (!o.pickup_rider_id) return { text: 'Finding a delivery partner for pickup', icon: 'ti-search' };
+    return { text: o.pickup_rider_id === me ? 'You are picking this up' : `${o.pickup_rider_name} is picking up`, icon: 'ti-motorbike' };
+  }
+  if (o.status === 'picked_up') return { text: `On the way to you · ${o.items_count} items`, icon: 'ti-motorbike', action: 'Receive & weigh' };
+  if (['at_provider', 'washing', 'drying', 'ironing'].includes(o.status) && PROCESS.includes(o.next_status)) {
+    return { text: STATUS[o.status].label, icon: STATUS[o.status].icon, quick: o.next_status };
+  }
+  if (o.status === 'ready') {
+    if (o.needs_reschedule) return { text: 'Missed delivery · kept with you until rescheduled', icon: 'ti-calendar-x' };
+    if (!o.delivery_rider_id) return { text: 'Ready · finding a delivery partner', icon: 'ti-search' };
+    return { text: o.delivery_rider_id === me ? 'You are delivering this' : `${o.delivery_rider_name} will collect it`, icon: 'ti-motorbike' };
+  }
+  if (o.status === 'out_for_delivery') return { text: `${o.delivery_rider_name || 'Rider'} is delivering`, icon: 'ti-truck-delivery' };
+  return { text: STATUS[o.status].label, icon: STATUS[o.status].icon };
+}
+const PROCESS = ['washing', 'drying', 'ironing', 'ready'];
+
+function myCard(o) {
+  const n = nextStep(o);
+  return `<div class="req" onclick="go('order/${o.id}')" style="cursor:pointer;">
+    <div class="top"><span class="code">${esc(o.code)} · ${esc(o.customer_name)}</span>${LL.statusChip(o.status)}</div>
+    <div class="line"><i class="ti ${n.icon}"></i>${esc(n.text)}</div>
+    <div class="line"><i class="ti ti-clock"></i>${['accepted', 'picked_up'].includes(o.status) ? 'Pickup ' + esc(fmtSlot(o.pickup_date, o.pickup_slot)) : 'Return ' + esc(fmtSlot(o.delivery_date, o.delivery_slot))}</div>
+    ${o.open_issues ? '<div class="line" style="color:var(--red-ink);"><i class="ti ti-alert-triangle" style="color:var(--red-ink);"></i>Open issue on this order</div>' : ''}
+    ${n.quick ? `<div style="margin-top:12px;"><button class="btn blue block small" onclick="event.stopPropagation(); advance(${o.id}, '${n.quick}', this)">
+        <i class="ti ${STATUS[n.quick].icon}"></i>${esc(ACTION[n.quick])}</button></div>`
+      : n.action ? `<div style="margin-top:12px;"><button class="btn primary block small">${esc(n.action)} <i class="ti ti-chevron-right"></i></button></div>` : ''}
+  </div>`;
+}
+
+async function active() {
+  await loadAll();
+  // Things arriving at the door first, then by due time.
+  const key = (o) => (o.status === 'picked_up' ? '0' : '1') + (['accepted', 'picked_up'].includes(o.status) ? o.pickup_date + o.pickup_slot : o.delivery_date + o.delivery_slot);
+  const list = S.mine.filter(ACTIVE).sort((a, b) => key(a).localeCompare(key(b)));
+  view.innerHTML = `${topBar()}
+    <p class="section-label">In progress (${list.length})</p>
+    ${list.map(myCard).join('') || '<div class="empty-note"><i class="ti ti-wash-machine"></i>No orders in progress.<br>Accept a request to get started.</div>'}`;
+}
+
+async function historyScreen() {
+  await loadAll();
+  const list = S.mine.filter((o) => !ACTIVE(o));
+  view.innerHTML = `<div class="screen-header"><p class="t">Completed orders</p></div>
+    ${list.map((o) => `<div class="order-card" onclick="go('order/${o.id}')">
+      <div class="icon-wrap ${o.status === 'delivered' ? 'sage' : 'red'}"><i class="ti ${STATUS[o.status].icon}"></i></div>
+      <div class="meta"><p class="t1">${esc(o.code)} · ${esc(o.customer_name)}</p>
+        <p class="t2">${o.status === 'delivered' ? `${rupee(o.provider_earning)} earned · ${o.provider_paid ? 'paid out' : 'payout pending'}${o.rating ? ' · ' + o.rating + '★' : ''}` : 'Cancelled'} · ${esc(fmtDay(o.updated_at.slice(0, 10)))}</p></div>
+      <i class="ti ti-chevron-right chev"></i></div>`).join('') || '<div class="empty-note"><i class="ti ti-history"></i>Finished orders will show here.</div>'}`;
+}
+
+async function order(id) {
+  const [o] = await Promise.all([LL.api('/api/orders/' + id), loadAll()]);
+  const mine = o.provider_id === provider().id;
+  const next = mine ? o.next_status : null;
+  const riderCard = (leg) => {
+    const name = o[`${leg}_rider_name`];
+    if (!name || o[`${leg}_rider_id`] === S.me.id) return '';
+    return `<div class="order-card static" style="margin-top:10px;">
+      <div class="icon-wrap blue"><i class="ti ti-motorbike"></i></div>
+      <div class="meta"><p class="t1">${esc(name)} · ${leg === 'pickup' ? 'pickup' : 'delivery'} partner</p><p class="t2">${esc(o[`${leg}_rider_vehicle`] || '')}</p></div>
+      ${o[`${leg}_rider_phone`] ? `<a class="icon-btn call" href="tel:${esc(o[`${leg}_rider_phone`])}" aria-label="Call rider"><i class="ti ti-phone"></i></a>` : ''}
+    </div>`;
+  };
+  let actionBox = '';
+  if (o.status === 'booked' && !o.provider_id) {
+    actionBox = `<button class="btn sage block" style="margin-top:16px;" onclick="accept(${o.id}, this)"><i class="ti ti-check"></i>Accept order</button>`;
+  } else if (mine && o.status === 'picked_up') {
+    // Rider (or the homemaker themselves) has the clothes; confirm the handover and weigh.
+    actionBox = `<div class="card" style="margin-top:16px;">
+      <p class="t1" style="font-weight:700; margin:0 0 4px;">Receive the clothes</p>
+      <p class="muted" style="font-size:12px; margin:0 0 10px;">${o.pickup_rider_id === S.me.id ? 'You' : esc(o.pickup_rider_name || 'The rider')} collected <b>${o.items_count} items</b>. Count them and weigh the bag.</p>
+      <div class="row2">
+        <div><label class="fl" for="items">Items received</label><input class="input" id="items" type="number" min="1" max="500" value="${o.items_count || ''}"></div>
+        <div><label class="fl" for="kg">Weight (kg)</label><input class="input" id="kg" type="number" min="0.5" max="50" step="0.1" value="${o.est_kg}"></div>
+      </div>
+      <p class="muted" style="font-size:11.5px; margin:6px 0 10px;">Final price = weight × ₹${o.price_per_kg}/kg. A different item count is flagged to support automatically.</p>
+      <button class="btn primary block" onclick="receive(${o.id}, this)"><i class="ti ti-scale"></i>Received &amp; weighed</button>
+    </div>`;
+  } else if (mine && o.my_leg) {
+    actionBox = `<div style="margin-top:16px;">${LL.legPanel(o)}</div>`;
+  } else if (mine && o.status === 'accepted') {
+    actionBox = o.needs_reschedule
+      ? `<div class="banner amber"><i class="ti ti-calendar-x"></i><div>Pickup was missed. Waiting for the customer to choose a new slot.</div></div>`
+      : !o.pickup_rider_id
+        ? `<div class="card" style="margin-top:16px;"><p class="t1" style="font-weight:700; margin:0 0 4px;">Finding a delivery partner</p>
+            <p class="muted" style="font-size:12px; margin:0 0 10px;">Nearby riders can see this pickup. Live close by? You can collect it yourself and earn the ₹${o.rider_fee} pickup fee.</p>
+            <button class="btn ghost block" onclick="LL.leg.take(${o.id}, this)"><i class="ti ti-walk"></i>I'll pick it up myself</button>
+            <button class="btn ghost block" style="margin-top:8px;" onclick="releaseOrder(${o.id}, this)">Can't do this order? Release it</button></div>`
+        : riderCard('pickup');
+  } else if (mine && o.status === 'ready') {
+    actionBox = o.needs_reschedule
+      ? `<div class="banner amber"><i class="ti ti-calendar-x"></i><div>Delivery was missed. Keep the bag safe until the customer picks a new slot.</div></div>`
+      : !o.delivery_rider_id
+        ? `<div class="card" style="margin-top:16px;"><p class="t1" style="font-weight:700; margin:0 0 4px;">Finding a delivery partner</p>
+            <p class="muted" style="font-size:12px; margin:0 0 10px;">Riders nearby can see this delivery. You can also deliver it yourself and earn the ₹${o.rider_fee} delivery fee.</p>
+            <button class="btn ghost block" onclick="LL.leg.take(${o.id}, this)"><i class="ti ti-walk"></i>I'll deliver it myself</button></div>`
+        : riderCard('delivery');
+  } else if (next && PROCESS.includes(next) && !['booked', 'accepted', 'picked_up'].includes(o.status)) {
+    actionBox = `<button class="btn blue block" style="margin-top:16px;" onclick="advance(${o.id}, '${next}', this)"><i class="ti ${STATUS[next].icon}"></i>${esc(ACTION[next])}</button>`;
+  } else if (mine && o.status === 'out_for_delivery') {
+    actionBox = riderCard('delivery');
+  }
+
+  const mapLink = o.address_text ? LL.mapsLink(o.address_text) : null;
+  view.innerHTML = `<div class="screen-header"><button class="back" onclick="history.back()" aria-label="Back"><i class="ti ti-arrow-left"></i></button><p class="t">${esc(o.code)}</p>${LL.statusChip(o.status)}</div>
+    <p class="lead">${esc(o.service_name)} · ${o.actual_kg ? o.actual_kg + ' kg' : '~' + o.est_kg + ' kg'} · booked ${esc(fmtTime(o.created_at))}</p>
+    ${actionBox}
+    <div class="order-card static" style="margin-top:16px;">
+      <div class="icon-wrap blue round">${esc(LL.initials(o.customer_name))}</div>
+      <div class="meta"><p class="t1">${esc(o.customer_name)}</p><p class="t2">${esc(o.address_text || o.area + ' (shown after accepting)')}</p></div>
+      ${o.customer_phone ? `<a class="icon-btn call" href="tel:${esc(o.customer_phone)}" aria-label="Call customer"><i class="ti ti-phone"></i></a>` : ''}
+    </div>
+    <div class="card">
+      <div class="kv"><span class="k">Pickup</span><span class="v">${esc(fmtSlot(o.pickup_date, o.pickup_slot))}</span></div>
+      <div class="kv"><span class="k">Return</span><span class="v">${esc(fmtSlot(o.delivery_date, o.delivery_slot))}</span></div>
+      ${mapLink ? `<div class="kv"><span class="k">Directions</span><span class="v"><a href="${mapLink}" target="_blank" rel="noopener">Open in Maps</a></span></div>` : ''}
+      ${o.notes ? `<div class="kv"><span class="k">Customer notes</span><span class="v">${esc(o.notes)}</span></div>` : ''}
+      ${o.items_count ? `<div class="kv"><span class="k">Items</span><span class="v">${o.items_count} picked up${o.items_received != null ? ` · ${o.items_received} received` : ''}</span></div>` : ''}
+      <div class="kv"><span class="k">${o.final_price != null ? 'Laundry price' : 'Estimated price'}</span><span class="v">${rupee(o.laundry_price)}</span></div>
+      <div class="kv"><span class="k">Your earning</span><span class="v">${rupee(o.provider_earning)} <small class="muted">(after ${Math.round(LL.config.commission * 100)}% fee)</small></span></div>
+      <div class="kv"><span class="k">Payment</span><span class="v">${o.payment_status === 'paid' ? `<span class="chip sage">Paid · ${esc(o.payment_method || '')}</span>` : '<span class="chip grey">Collected at delivery</span>'}</span></div>
+      ${o.rating ? `<div class="kv"><span class="k">Rating</span><span class="v">${o.rating}★ ${o.review ? '· “' + esc(o.review) + '”' : ''}</span></div>` : ''}
+    </div>
+    ${(o.issues || []).map((i) => `<div class="banner ${i.status === 'open' ? 'red' : 'sage'}"><i class="ti ti-alert-triangle"></i><div><b>${esc(LL.config.issueTypes[i.type] || i.type)}</b> · ${esc(i.status)}<br>${esc(i.description || '')}${i.resolution ? `<br>Resolution: ${esc(i.resolution)}` : ''}</div></div>`).join('')}
+    <p class="section-label">Timeline</p>
+    ${LL.stepperHtml(o)}`;
+}
+
+async function advance(id, expected, btn) {
+  await LL.busy(btn, async () => {
+    await LL.api(`/api/orders/${id}/advance`, { method: 'POST', body: { expected } });
+    LL.toast(`${STATUS[expected].label} — customer notified`);
+    render();
+  });
+}
+async function receive(id, btn) {
+  await LL.busy(btn, async () => {
+    await LL.api(`/api/orders/${id}/receive`, { method: 'POST', body: {
+      actual_kg: Number(document.getElementById('kg').value), items_received: Number(document.getElementById('items').value) } });
+    LL.toast('Received — customer notified of the final price');
+    render();
+  });
+}
+window.onLegDone = () => render();
+async function releaseOrder(id, btn) {
+  if (!window.confirm('Release this order so another provider can take it?')) return;
+  await LL.busy(btn, async () => {
+    await LL.api(`/api/orders/${id}/release`, { method: 'POST', body: {} });
+    LL.toast('Order released');
+    go('active');
+  });
+}
+
+async function profile() {
+  const [st, notes] = await Promise.all([LL.api('/api/provider/stats'), LL.api('/api/notifications')]);
+  const p = provider();
+  view.innerHTML = `${topBar()}
+    <div class="stat-grid">
+      <div class="stat"><div class="n">${rupee(st.earnings_today)}</div><div class="l">Earned today</div></div>
+      <div class="stat"><div class="n">${rupee(st.earnings_total)}</div><div class="l">Earned in total</div></div>
+      <div class="stat"><div class="n">${st.completed}</div><div class="l">Orders delivered</div></div>
+      <div class="stat"><div class="n">${st.rating.r ? st.rating.r + '★' : '—'}</div><div class="l">${st.rating.n} rating${st.rating.n === 1 ? '' : 's'}</div></div>
+    </div>
+    ${st.payout_due ? `<div class="banner sage"><i class="ti ti-cash"></i><div>${rupee(st.payout_due)} payout pending from LaundryLoop for delivered orders${st.cash_in_hand ? `, minus ${rupee(st.cash_in_hand)} cash you collected on self-deliveries` : ''}.</div></div>` : ''}
+
+    <p class="section-label">Notifications</p>
+    ${notes.items.slice(0, 5).map((n) => `<div class="order-card ${n.order_id ? '' : 'static'}" ${n.order_id ? `onclick="go('order/${n.order_id}')"` : ''}>
+      <div class="icon-wrap ${n.read ? 'sage' : 'blue'}"><i class="ti ti-bell"></i></div>
+      <div class="meta"><p class="t1">${esc(n.title)}</p><p class="t2">${esc(n.body || '')} · ${esc(LL.ago(n.created_at))}</p></div></div>`).join('') || '<p class="muted" style="font-size:13px;">Nothing yet.</p>'}
+
+    <p class="section-label">Business details</p>
+    <div class="form-grid" id="biz">
+      <input class="input" name="business_name" value="${esc(p.business_name)}" placeholder="Business name">
+      <input class="input" name="area" value="${esc(p.area)}" placeholder="Service area">
+      <input class="input" name="address" value="${esc(p.address || '')}" placeholder="Address">
+      <textarea class="input" name="bio" placeholder="A line about you, shown to customers">${esc(p.bio || '')}</textarea>
+      <button class="btn ghost" onclick="saveBiz(this)">Save details</button>
+    </div>
+    <p class="section-label">Appearance</p>
+    ${LL.themePicker()}
+    <button class="btn danger block" style="margin-top:28px;" onclick="LL.logout()"><i class="ti ti-logout"></i>Sign out</button>`;
+  if (notes.unread) LL.api('/api/notifications/read', { method: 'POST' });
+}
+
+async function saveBiz(btn) {
+  const f = document.getElementById('biz');
+  await LL.busy(btn, async () => {
+    S.me = await LL.api('/api/provider/profile', { method: 'PATCH', body: {
+      business_name: f.business_name.value, area: f.area.value, address: f.address.value, bio: f.bio.value } });
+    LL.toast('Saved');
+    render();
+  });
+}
+
+let refreshTimer;
+function onLive(msg) {
+  if (msg.type === 'notification') {
+    LL.api('/api/notifications').then(async ({ items }) => {
+      if (items[0] && !items[0].read) LL.toast(items[0].title);
+      // Verification status may have changed.
+      S.me = await LL.api('/api/me');
+      render();
+    });
+    return;
+  }
+  if (msg.type === 'order') {
+    clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(() => {
+      const [name, arg] = current();
+      // Don't wipe a field the provider is typing in (e.g. pickup weight).
+      if (view.contains(document.activeElement) && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return loadAll();
+      render();
+    }, 150);
+  }
+}
+
+(async () => {
+  S.me = await LL.requireRole('provider');
+  LL.clock(document.getElementById('clock'));
+  LL.live(onLive, (on) => document.getElementById('live').classList.toggle('off', !on));
+  render();
+})();
+</script>
+</body>
+</html>

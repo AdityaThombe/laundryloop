@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>LaundryLoop Delivery</title>
+<meta name="theme-color" content="#FFFFFF">
+<script>(function(){try{var t=localStorage.getItem('ll_theme');if(t&&t!=='auto')document.documentElement.dataset.theme=t}catch(e){}})();</script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css">
+<link rel="stylesheet" href="/styles.css">
+<style>
+  .route{display:grid; grid-template-columns:16px 1fr; gap:2px 10px; font-size:12.5px; margin-top:4px; background:var(--card-2); border-radius:12px; padding:10px 12px;}
+  .route .dot{width:10px; height:10px; border-radius:50%; margin-top:4px; justify-self:center;}
+  .route .dot.a{background:var(--blue);}
+  .route .dot.b{background:var(--sage);}
+  .route .bar{width:2px; height:14px; background:var(--line); justify-self:center;}
+  .route b{font-weight:600;}
+  .fee-badge{display:inline-flex; align-items:baseline; gap:4px; background:var(--sage-tint); color:var(--sage-ink); border-radius:12px; padding:6px 10px;}
+  .fee-badge small{font-size:11px; font-weight:600;}
+</style>
+</head>
+<body class="phone">
+<div class="frame">
+  <div class="notch"></div>
+  <div class="statusbar"><span id="clock"></span><span class="brandmark"><i class="ti ti-refresh"></i>LaundryLoop</span><span><span id="gps" class="live-dot off hidden" style="margin-right:8px;">GPS</span><span class="live-dot off" id="live">Offline</span></span></div>
+  <div class="view" id="view"><div class="skel-stack"><div class="skel" style="height:52px"></div><div class="skel" style="height:160px"></div><div class="skel" style="height:74px"></div><div class="skel" style="height:74px"></div></div></div>
+  <nav class="navbar" id="nav">
+    <button class="navitem" data-go="jobs"><i class="ti ti-list-search"></i>Jobs<span class="badge hidden" id="jobs-badge"></span></button>
+    <button class="navitem" data-go="tasks"><i class="ti ti-motorbike"></i>My tasks<span class="badge hidden" id="tasks-badge"></span></button>
+    <button class="navitem" data-go="history"><i class="ti ti-history"></i>History</button>
+    <button class="navitem" data-go="profile"><i class="ti ti-user"></i>Profile</button>
+  </nav>
+</div>
+
+<script src="/common.js"></script>
+<script>
+const { esc, rupee, fmtSlot, fmtTime, fmtDay, STATUS } = LL;
+const view = document.getElementById('view');
+const S = { me: null, jobs: [], mine: [] };
+const rider = () => S.me.rider;
+const ACTIVE_LEG = (o) => o.my_leg !== null;
+
+async function loadAll() {
+  [S.jobs, S.mine] = await Promise.all([LL.api('/api/rider/jobs'), LL.api('/api/orders')]);
+  setBadge('jobs-badge', S.jobs.length);
+  setBadge('tasks-badge', S.mine.filter(ACTIVE_LEG).length);
+  syncGps();
+}
+function setBadge(id, n) {
+  const el = document.getElementById(id);
+  el.textContent = n;
+  el.classList.toggle('hidden', !n);
+}
+
+function go(route) { location.hash = route; }
+function current() { return (location.hash.slice(1) || 'jobs').split('/'); }
+async function render() {
+  const [name, arg] = current();
+  const screens = { jobs, tasks, task, history: historyScreen, profile };
+  document.querySelectorAll('#nav .navitem').forEach((b) => b.classList.toggle('on', b.dataset.go === (name === 'task' ? 'tasks' : name)));
+  try { await (screens[name] || jobs)(arg); }
+  catch (e) { view.innerHTML = `<div class="empty-note"><i class="ti ti-alert-triangle"></i>${esc(e.message)}</div>`; }
+}
+window.addEventListener('hashchange', () => {
+  view.scrollTop = 0;
+  view.classList.remove('enter');
+  void view.offsetWidth;
+  view.classList.add('enter');
+  render();
+});
+document.querySelectorAll('#nav .navitem').forEach((b) => (b.onclick = () => go(b.dataset.go)));
+window.onLegDone = () => render();
+
+function topBar(st) {
+  const r = rider();
+  return `<div class="partner-top">
+      <div class="icon-wrap blue round">${esc(LL.initials(S.me.name))}</div>
+      <div class="meta"><p class="t1" style="margin:0;">${esc(S.me.name)}</p><p class="t2"><i class="ti ti-motorbike"></i> ${esc(r.vehicle)} · ${esc(r.area)}</p></div>
+      <button class="icon-btn" onclick="go('profile')" aria-label="Profile"><i class="ti ti-user"></i></button>
+    </div>
+    ${st && r.verified ? `<div class="stat-strip">
+      <div><div class="n">${rupee(st.earnings_today)}</div><div class="l">Earned today</div></div>
+      <div><div class="n">${st.legs_today}</div><div class="l">Jobs today</div></div>
+      <div><div class="n">${rupee(st.cash_in_hand)}</div><div class="l">Cash in hand</div></div>
+    </div>` : ''}
+    ${r.verified ? `<div class="switch-row ${r.online ? 'on' : ''}">
+        <div class="txt"><b>${r.online ? "You're online" : "You're offline"}</b><span>${r.online ? 'New pickup and delivery jobs appear below' : 'Go online to see and take jobs'}</span></div>
+        <label class="toggle"><input type="checkbox" ${r.online ? 'checked' : ''} onchange="setOnline(this)"><span></span></label>
+      </div>`
+      : `<div class="banner amber"><i class="ti ti-shield-half"></i><div><b>Waiting for verification</b><br>The LaundryLoop team checks your ID and vehicle before you can take jobs. You'll be notified here.</div></div>`}`;
+}
+
+async function setOnline(input) {
+  try {
+    S.me = await LL.api('/api/rider/profile', { method: 'PATCH', body: { online: input.checked } });
+    LL.toast(input.checked ? "You're online" : "You're offline");
+    render();
+  } catch (e) { input.checked = !input.checked; LL.toast(e.message, true); }
+}
+
+function routeHtml(o) {
+  const pickup = o.status === 'accepted' || (o.my_leg === 'pickup');
+  const from = pickup ? [o.customer_name ? 'Customer' : 'Customer', o.address_text || o.area] : [o.provider_name, o.provider_address || o.provider_area];
+  const to = pickup ? [o.provider_name, o.provider_address || o.provider_area] : ['Customer', o.address_text || o.area];
+  return `<div class="route">
+    <span class="dot a"></span><span><b>${esc(from[0])}</b> · ${esc(from[1] || '')}</span>
+    <span class="bar"></span><span></span>
+    <span class="dot b"></span><span><b>${esc(to[0])}</b> · ${esc(to[1] || '')}</span>
+  </div>`;
+}
+
+function jobCard(o) {
+  const pickup = o.status === 'accepted';
+  return `<div class="job">
+    <div class="top"><span class="code">${esc(o.code)}</span><span class="chip ${pickup ? 'blue' : 'sage'}">${pickup ? 'Pickup' : 'Delivery'}</span></div>
+    ${routeHtml(o)}
+    <div class="rider-line"><i class="ti ti-clock"></i>${esc(pickup ? fmtSlot(o.pickup_date, o.pickup_slot) : fmtSlot(o.delivery_date, o.delivery_slot))}
+      · ${o.actual_kg ? o.actual_kg : '~' + o.est_kg} kg${!pickup && o.payment_status !== 'paid' ? ` · collect ${rupee(o.total)} cash/UPI` : ''}</div>
+    <div class="card-foot">
+      <span class="fee-badge"><span class="fee">${rupee(o.rider_fee)}</span><small>you earn</small></span>
+      <button class="btn sage small" onclick="takeJob(${o.id}, this)"><i class="ti ti-check"></i>Take job</button>
+    </div>
+  </div>`;
+}
+
+async function takeJob(id, btn) {
+  await LL.busy(btn, async () => {
+    await LL.api(`/api/orders/${id}/take`, { method: 'POST' });
+    LL.toast('Job is yours');
+    go('task/' + id);
+  });
+}
+
+async function jobs() {
+  const [st] = await Promise.all([LL.api('/api/rider/stats'), loadAll()]);
+  const r = rider();
+  view.innerHTML = `${topBar(st)}
+    <p class="section-label">Available jobs</p>
+    ${!r.verified ? '<div class="empty-note"><i class="ti ti-lock"></i>Jobs appear here once you are verified.</div>'
+      : !r.online ? '<div class="empty-note"><i class="ti ti-power"></i>You are offline.</div>'
+      : S.jobs.length ? S.jobs.map(jobCard).join('')
+      : '<div class="empty-note"><i class="ti ti-mood-smile"></i>No open jobs right now.<br>New ones appear here automatically.</div>'}`;
+}
+
+function taskCard(o) {
+  const step = o.my_leg === 'pickup'
+    ? (o.status === 'accepted' ? 'Go to customer' : 'Drop at laundry')
+    : (o.status === 'ready' ? 'Collect from laundry' : 'Deliver to customer');
+  return `<div class="job" onclick="go('task/${o.id}')" style="cursor:pointer;">
+    <div class="top"><span class="code">${esc(o.code)}</span><span class="chip ${o.my_leg === 'pickup' ? 'blue' : 'sage'}">${o.my_leg === 'pickup' ? 'Pickup' : 'Delivery'}</span></div>
+    ${routeHtml(o)}
+    <div class="rider-line"><i class="ti ti-clock"></i>${esc(o.my_leg === 'pickup' ? fmtSlot(o.pickup_date, o.pickup_slot) : fmtSlot(o.delivery_date, o.delivery_slot))}</div>
+    <button class="btn primary block small" style="margin-top:12px;">Next: ${esc(step)} <i class="ti ti-chevron-right"></i></button>
+  </div>`;
+}
+
+async function tasks() {
+  await loadAll();
+  const list = S.mine.filter(ACTIVE_LEG);
+  view.innerHTML = `${topBar()}
+    <p class="section-label">My tasks (${list.length})</p>
+    ${list.map(taskCard).join('') || '<div class="empty-note"><i class="ti ti-motorbike"></i>No tasks yet.<br>Take a job from the Jobs tab.</div>'}`;
+}
+
+async function task(id) {
+  const [o] = await Promise.all([LL.api('/api/orders/' + id), loadAll()]);
+  const panel = LL.legPanel(o);
+  view.innerHTML = `<div class="screen-header"><button class="back" onclick="go('tasks')" aria-label="Back"><i class="ti ti-arrow-left"></i></button><p class="t">${esc(o.code)}</p>${LL.statusChip(o.status)}</div>
+    <p class="lead">${esc(o.service_name)} · ${o.actual_kg ? o.actual_kg + ' kg' : '~' + o.est_kg + ' kg'}${o.items_count ? ` · ${o.items_count} items` : ''} · you earn ${rupee(o.rider_fee)}</p>
+    ${panel || `<div class="banner sage"><i class="ti ti-circle-check"></i><div>Your part of this order is done. Thanks!</div></div>`}
+    <p class="section-label">Timeline</p>
+    ${LL.stepperHtml(o)}`;
+}
+
+async function historyScreen() {
+  await loadAll();
+  const done = S.mine.filter((o) => !ACTIVE_LEG(o));
+  view.innerHTML = `<div class="screen-header"><p class="t">Completed jobs</p></div>
+    ${done.map((o) => {
+      const legs = [o.pickup_rider_id === S.me.id && o.picked_up_at ? 'Pickup' : null, o.delivery_rider_id === S.me.id && o.delivered_at ? 'Delivery' : null].filter(Boolean);
+      return `<div class="order-card" onclick="go('task/${o.id}')">
+        <div class="icon-wrap ${legs.length ? 'sage' : 'red'}"><i class="ti ${legs.length ? 'ti-check' : 'ti-x'}"></i></div>
+        <div class="meta"><p class="t1">${esc(o.code)} · ${esc(legs.join(' + ') || 'Not completed')}</p>
+          <p class="t2">${legs.length ? rupee(legs.length * o.rider_fee) + ' earned' : esc(STATUS[o.status].label)} · ${esc(o.area)}</p></div>
+        <i class="ti ti-chevron-right chev"></i></div>`;
+    }).join('') || '<div class="empty-note"><i class="ti ti-history"></i>Finished jobs will show here.</div>'}`;
+}
+
+async function profile() {
+  const [st, notes] = await Promise.all([LL.api('/api/rider/stats'), LL.api('/api/notifications')]);
+  const r = rider();
+  view.innerHTML = `${topBar()}
+    <div class="stat-grid">
+      <div class="stat"><div class="n">${rupee(st.earnings_today)}</div><div class="l">Earned today (${st.legs_today} jobs)</div></div>
+      <div class="stat"><div class="n">${rupee(st.earnings_total)}</div><div class="l">Earned in total</div></div>
+      <div class="stat"><div class="n">${rupee(st.cash_in_hand)}</div><div class="l">Cash in hand</div></div>
+      <div class="stat"><div class="n">${st.net >= 0 ? rupee(st.net) : '−' + rupee(-st.net)}</div><div class="l">${st.net >= 0 ? 'LaundryLoop owes you' : 'You owe LaundryLoop'}</div></div>
+    </div>
+    ${st.cash_in_hand ? `<div class="banner amber"><i class="ti ti-cash"></i><div>Hand in ${rupee(st.cash_in_hand)} of customer cash at your next settlement. Your earnings (${rupee(st.earnings_due)}) are deducted from it.</div></div>` : ''}
+
+    <p class="section-label">Notifications</p>
+    ${notes.items.slice(0, 6).map((n) => `<div class="order-card ${n.order_id ? '' : 'static'}" ${n.order_id ? `onclick="go('task/${n.order_id}')"` : ''}>
+      <div class="icon-wrap ${n.read ? 'sage' : 'blue'}"><i class="ti ti-bell"></i></div>
+      <div class="meta"><p class="t1">${esc(n.title)}</p><p class="t2">${esc(n.body || '')} · ${esc(LL.ago(n.created_at))}</p></div></div>`).join('') || '<p class="muted" style="font-size:13px;">Nothing yet.</p>'}
+
+    <p class="section-label">Your details</p>
+    <div class="form-grid" id="det">
+      <input class="input" name="area" value="${esc(r.area)}" placeholder="Area you cover">
+      <input class="input" name="vehicle" value="${esc(r.vehicle)}" placeholder="Vehicle (Bike, Bicycle, Scooter)">
+      <button class="btn ghost" onclick="saveDetails(this)">Save details</button>
+    </div>
+    <p class="muted" style="font-size:12px; margin-top:14px;">Your location is shared with the customer and laundry only while you have an active job.</p>
+    <p class="section-label">Appearance</p>
+    ${LL.themePicker()}
+    <button class="btn danger block" style="margin-top:28px;" onclick="LL.logout()"><i class="ti ti-logout"></i>Sign out</button>`;
+  if (notes.unread) LL.api('/api/notifications/read', { method: 'POST' });
+}
+
+async function saveDetails(btn) {
+  const f = document.getElementById('det');
+  await LL.busy(btn, async () => {
+    S.me = await LL.api('/api/rider/profile', { method: 'PATCH', body: { area: f.area.value, vehicle: f.vehicle.value } });
+    LL.toast('Saved');
+    render();
+  });
+}
+
+// ---------- location sharing while on a job ----------
+let watchId = null;
+let lastSent = 0;
+function syncGps() {
+  const gps = document.getElementById('gps');
+  const want = rider()?.online && S.mine.some(ACTIVE_LEG) && 'geolocation' in navigator;
+  gps.classList.toggle('hidden', !want);
+  if (want && watchId === null) {
+    watchId = navigator.geolocation.watchPosition((pos) => {
+      gps.classList.remove('off');
+      if (Date.now() - lastSent < 20000) return;
+      lastSent = Date.now();
+      LL.api('/api/rider/location', { method: 'POST', body: { lat: pos.coords.latitude, lng: pos.coords.longitude } }).catch(() => {});
+    }, () => gps.classList.add('off'), { enableHighAccuracy: true, maximumAge: 15000 });
+  } else if (!want && watchId !== null) {
+    navigator.geolocation.clearWatch(watchId);
+    watchId = null;
+  }
+}
+
+let refreshTimer;
+function onLive(msg) {
+  if (msg.type === 'notification') {
+    LL.api('/api/notifications').then(async ({ items }) => {
+      if (items[0] && !items[0].read) LL.toast(items[0].title);
+    });
+  }
+  if (msg.type === 'providers' || msg.type === 'notification') {
+    LL.api('/api/me').then((me) => { S.me = me; });
+  }
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(() => {
+    // Don't wipe a code or count the rider is typing.
+    if (view.contains(document.activeElement) && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return loadAll();
+    render();
+  }, 300);
+}
+
+(async () => {
+  S.me = await LL.requireRole('rider');
+  LL.clock(document.getElementById('clock'));
+  LL.live(onLive, (on) => document.getElementById('live').classList.toggle('off', !on));
+  render();
+})();
+</script>
+</body>
+</html>

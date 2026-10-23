@@ -1,0 +1,18 @@
+{
+  "name": "laundryloop",
+  "version": "1.0.0",
+  "description": "LaundryLoop: book, track and fulfil local laundry pickups. Customer app, homemaker/provider portal and admin console.",
+  "main": "server.js",
+  "private": true,
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "reset-db": "node -e \"require('fs').rmSync('data',{recursive:true,force:true})\""
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.5.10",
+    "pg": "^8.23.1"
+  }
+}
