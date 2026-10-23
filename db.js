@@ -311,6 +311,17 @@ async function seedRiders(q) {
   }
 }
 
+// ADMIN_PASSWORD is the source of truth for the admin account: change it on Vercel and redeploy to
+// reset the password. A change also signs the admin out everywhere.
+async function syncAdminPassword(q) {
+  const pw = process.env.ADMIN_PASSWORD;
+  if (!pw) return;
+  const admin = await q.get("SELECT id, password_hash FROM users WHERE email='admin@laundryloop.test'");
+  if (!admin || verifyPassword(pw, admin.password_hash)) return;
+  await q.run('UPDATE users SET password_hash=? WHERE id=?', hashPassword(pw), admin.id);
+  await q.run('DELETE FROM sessions WHERE user_id=?', admin.id);
+}
+
 // Connect, create tables and seed once per process; every request awaits this.
 let ready;
 function init() {
@@ -324,6 +335,7 @@ function init() {
         const tq = makeQ((s, p) => tx.query(s, p));
         await seed(tq);
         await seedRiders(tq);
+        await syncAdminPassword(tq);
       });
     })().catch((e) => { ready = null; throw e; });
   }
