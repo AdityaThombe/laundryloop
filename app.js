@@ -238,10 +238,11 @@ async function raiseIssue(order, raisedBy, type, description) {
 // ---------- routing ----------
 const ANY = 'any';
 const routes = [];
-function route(method, pattern, roles, handler) {
+// opts.raw: the request body is binary (read as a Buffer, up to RAW_LIMIT) rather than JSON.
+function route(method, pattern, roles, handler, opts = {}) {
   const keys = [];
   const re = new RegExp('^' + pattern.replace(/:(\w+)/g, (_, k) => { keys.push(k); return '([^/]+)'; }) + '$');
-  routes.push({ method, re, keys, roles, handler });
+  routes.push({ method, re, keys, roles, handler, raw: !!opts.raw });
 }
 
 // --- public ---
@@ -1013,6 +1014,82 @@ route('PATCH', '/api/admin/services/:id', ['admin'], async ({ params, body }) =>
   return { ok: true };
 });
 
+// --- presentation decks (hidden /present page), shared across the admin's devices ---
+// Vercel caps a request or response at ~4.5 MB, so files move in DECK_CHUNK pieces.
+const DECK_CHUNK = 3 * 1024 * 1024;
+const DECK_MAX = 80 * 1024 * 1024;
+const RAW_LIMIT = DECK_CHUNK + 1024;
+const deckRow = (d) => ({ ...d, files: JSON.parse(d.files), size: Number(d.size) });
+async function loadDeck(id) {
+  const d = await q.get('SELECT * FROM decks WHERE id=?', Number(id));
+  if (!d) fail(404, 'Deck not found');
+  return deckRow(d);
+}
+
+route('GET', '/api/decks', ['admin'], async () => ({
+  chunkSize: DECK_CHUNK,
+  decks: (await q.all('SELECT * FROM decks WHERE complete=1 ORDER BY created_at DESC')).map(deckRow),
+}));
+
+route('POST', '/api/decks', ['admin'], async ({ user, body }) => {
+  const name = String(body.name || '').trim().slice(0, 120);
+  if (!name) fail(400, 'Name the deck');
+  if (!['pptx', 'pdf', 'image'].includes(body.kind)) fail(400, 'Upload a .pptx, .pdf or images');
+  const files = (Array.isArray(body.files) ? body.files : []).slice(0, 200).map((f) => ({
+    name: String(f.name || 'file').slice(0, 200), type: String(f.type || '').slice(0, 100), size: Math.round(num(f.size, 'File size', 1, DECK_MAX)),
+  }));
+  if (!files.length) fail(400, 'No files');
+  files.forEach((f) => { f.chunks = Math.ceil(f.size / DECK_CHUNK); });
+  const size = files.reduce((t, f) => t + f.size, 0);
+  if (size > DECK_MAX) fail(413, `Decks can be up to ${DECK_MAX / 1048576} MB`);
+  const cover = typeof body.cover === 'string' && body.cover.startsWith('data:image/') && body.cover.length < 300000 ? body.cover : null;
+  // Uploads abandoned for a day are cleared out.
+  await q.run('DELETE FROM decks WHERE complete=0 AND created_at < ?', new Date(Date.now() - 864e5).toISOString());
+  const now = nowIso();
+  const d = await q.get(`INSERT INTO decks (name,kind,files,size,slides,cover,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?) RETURNING *`,
+    name, body.kind, JSON.stringify(files), size, Math.round(num(body.slides, 'Slides', 1, 5000)), cover, user.id, now, now);
+  return { ...deckRow(d), chunkSize: DECK_CHUNK };
+});
+
+route('PUT', '/api/decks/:id/files/:f/chunks/:n', ['admin'], async ({ params, body }) => {
+  const d = await loadDeck(params.id);
+  if (d.complete) fail(409, 'This deck is already uploaded');
+  const f = Number(params.f), n = Number(params.n);
+  const file = d.files[f];
+  if (!file || !Number.isInteger(n) || n < 0 || n >= file.chunks) fail(400, 'Unknown chunk');
+  const want = n === file.chunks - 1 ? file.size - n * DECK_CHUNK : DECK_CHUNK;
+  if (body.length !== want) fail(400, `Chunk should be ${want} bytes, got ${body.length}`);
+  await q.run(`INSERT INTO deck_chunks (deck_id,file_idx,idx,data) VALUES (?,?,?,?)
+               ON CONFLICT (deck_id,file_idx,idx) DO UPDATE SET data=EXCLUDED.data`, d.id, f, n, body);
+}, { raw: true });
+
+route('POST', '/api/decks/:id/complete', ['admin'], async ({ params }) => {
+  const d = await loadDeck(params.id);
+  const have = await q.get('SELECT COUNT(*)::int AS c FROM deck_chunks WHERE deck_id=?', d.id);
+  const want = d.files.reduce((t, f) => t + f.chunks, 0);
+  if (have.c !== want) fail(409, `Upload incomplete: ${have.c} of ${want} parts arrived`);
+  await q.run('UPDATE decks SET complete=1, updated_at=? WHERE id=?', nowIso(), d.id);
+  return loadDeck(d.id);
+});
+
+route('GET', '/api/decks/:id/files/:f/chunks/:n', ['admin'], async ({ params }) => {
+  const c = await q.get('SELECT data FROM deck_chunks WHERE deck_id=? AND file_idx=? AND idx=?', Number(params.id), Number(params.f), Number(params.n));
+  if (!c) fail(404, 'Chunk not found');
+  return Buffer.from(c.data);
+});
+
+route('PATCH', '/api/decks/:id', ['admin'], async ({ params, body }) => {
+  const d = await loadDeck(params.id);
+  const name = String(body.name || '').trim().slice(0, 120);
+  if (!name) fail(400, 'Name the deck');
+  await q.run('UPDATE decks SET name=?, updated_at=? WHERE id=?', name, nowIso(), d.id);
+  return loadDeck(d.id);
+});
+
+route('DELETE', '/api/decks/:id', ['admin'], async ({ params }) => {
+  await q.run('DELETE FROM decks WHERE id=?', Number(params.id));
+});
+
 // ---------- HTTP plumbing ----------
 function readJson(req) {
   return new Promise((resolve, reject) => {
@@ -1028,6 +1105,20 @@ function readJson(req) {
       try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')) || {}); }
       catch { reject(new HttpError(400, 'Invalid JSON')); }
     });
+    req.on('error', reject);
+  });
+}
+
+function readRaw(req) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks = [];
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > RAW_LIMIT) { reject(new HttpError(413, 'Request too large')); req.destroy(); }
+      else chunks.push(c);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
     req.on('error', reject);
   });
 }
@@ -1060,9 +1151,13 @@ async function handleApi(req, res) {
       if (!user) fail(401, 'Please sign in');
       if (r.roles !== ANY && !r.roles.includes(user.role)) fail(403, 'Not allowed');
     }
-    const body = req.method === 'GET' ? {} : await readJson(req);
+    const body = req.method === 'GET' ? {} : r.raw ? await readRaw(req) : await readJson(req);
     const params = Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(match[i + 1])]));
     const result = await r.handler({ req, user, token, body, params, query: url.searchParams });
+    if (Buffer.isBuffer(result)) {
+      res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': result.length, 'Cache-Control': 'private, max-age=31536000, immutable' });
+      return res.end(result);
+    }
     sendJson(res, 200, result ?? { ok: true });
   } catch (e) {
     if (e instanceof HttpError) sendJson(res, e.status, { error: e.message });

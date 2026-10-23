@@ -26,6 +26,21 @@
   .top .back{margin-left:auto; color:var(--ink-soft); text-decoration:none; font-size:13px; font-weight:500; display:inline-flex; align-items:center; gap:6px;}
   .top .back:hover{color:var(--ink);}
   .top .back{white-space:nowrap;}
+  .top .who{margin-left:auto;}
+  .top .who + .back{margin-left:16px;}
+  .linkish{background:none; border:none; padding:0; color:var(--ink-soft); font-size:13px; font-weight:500; cursor:pointer;}
+  .linkish:hover{color:var(--ink);}
+  .signin{max-width:380px; display:grid; gap:10px; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:20px;}
+  .signin b{font-family:var(--display); font-size:20px; letter-spacing:-.025em;}
+  .signin p{margin:0; color:var(--ink-soft); font-size:13.5px; line-height:1.5;}
+  .signin .err{color:var(--red-ink); min-height:18px;}
+  .sync{display:flex; align-items:center; gap:5px; font-size:12px; color:var(--ink-faint); margin-top:6px;}
+  .sync i{font-size:14px;}
+  .sync.ok{color:var(--brand);}
+  .sync.warn{color:var(--tag);}
+  .offline{display:flex; gap:8px; align-items:center; font-size:13px; color:var(--tag); margin:0 0 14px;}
+  .loading{position:absolute; inset:0; display:flex; flex-direction:column; gap:14px; align-items:center; justify-content:center; color:rgba(255,255,255,.7); font-size:13px; font-weight:600; font-variant-numeric:tabular-nums;}
+  .loading .spin{width:30px; height:30px; border-radius:50%; border:3px solid rgba(255,255,255,.15); border-top-color:#fff; animation:spin .8s linear infinite;}
   @media (max-width:480px){ .top .tag{display:none;} }
   h1{font-family:var(--display); font-size:clamp(30px,4vw,44px); letter-spacing:-.045em; font-weight:800; margin:0 0 8px; color:var(--ink);}
   .intro{color:var(--ink-soft); font-size:15px; margin:0 0 28px; max-width:620px; line-height:1.6;}
@@ -140,10 +155,11 @@
 <div class="lib" id="lib">
   <div class="top">
     <a class="logo" href="/"><i class="ti ti-refresh"></i>LaundryLoop</a><span class="tag">Presenter</span>
+    <span id="who" class="who"></span>
     <a class="back" href="/"><i class="ti ti-arrow-left"></i>Back to app</a>
   </div>
   <h1>Present right from the browser</h1>
-  <p class="intro">Upload a PowerPoint or a PDF once and present it full screen from here, with no PowerPoint needed. Decks are saved privately in this browser on this device.</p>
+  <p class="intro">Upload a PowerPoint or a PDF once and present it full screen from any of your devices, with no PowerPoint needed. Upload on your phone and it is on your laptop too.</p>
 
   <div class="drop" id="drop" role="button" tabindex="0">
     <input type="file" id="file" hidden multiple accept=".pptx,.pdf,.ppt,image/*,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation">
@@ -158,9 +174,9 @@
     </div>
     <div class="fmts"><span>PPTX</span><span>PDF</span><span>PNG / JPG</span></div>
   </div>
-  <p class="note"><i class="ti ti-info-circle"></i><span>PowerPoint files are drawn in the browser, so animations, video and some fonts may differ. For a pixel-perfect copy, export as PDF in PowerPoint (<b>File → Export → PDF</b>) and upload that. Old <b>.ppt</b> files must be saved as .pptx or PDF first.</span></p>
+  <p class="note" id="note"><i class="ti ti-info-circle"></i><span>PowerPoint files are drawn in the browser, so animations, video and some fonts may differ. For a pixel-perfect copy, export as PDF in PowerPoint (<b>File → Export → PDF</b>) and upload that. Old <b>.ppt</b> files must be saved as .pptx or PDF first.</span></p>
 
-  <h2>Your decks</h2>
+  <h2 id="decks-h">Your decks</h2>
   <div id="decks"></div>
 
   <div class="keys">
@@ -198,31 +214,58 @@ const PDF_LIB = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.m
 const PDF_WORKER = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs';
 const $ = (id) => document.getElementById(id);
 
-// ---------- storage: decks live in IndexedDB, in this browser only ----------
+// ---------- storage ----------
+// Decks live on the server (admin only), so an upload shows up on every device. Each browser keeps
+// the files it has downloaded in IndexedDB ("files", keyed by server deck id) so a deck opens
+// instantly next time and still works offline. The "decks" store holds decks from before syncing
+// existed, which stay on the device they were added on until uploaded.
 const DB = (() => {
   let dbp;
   const open = () => dbp || (dbp = new Promise((res, rej) => {
-    const r = indexedDB.open('ll-present', 1);
-    r.onupgradeneeded = () => r.result.createObjectStore('decks', { keyPath: 'id', autoIncrement: true });
+    const r = indexedDB.open('ll-present', 2);
+    r.onupgradeneeded = () => {
+      if (!r.result.objectStoreNames.contains('decks')) r.result.createObjectStore('decks', { keyPath: 'id', autoIncrement: true });
+      if (!r.result.objectStoreNames.contains('files')) r.result.createObjectStore('files', { keyPath: 'sid' });
+    };
     r.onsuccess = () => res(r.result);
     r.onerror = () => rej(r.error);
   }));
-  const tx = async (mode, fn) => {
+  const tx = async (store, mode, fn) => {
     const db = await open();
     return new Promise((res, rej) => {
-      const t = db.transaction('decks', mode);
-      const req = fn(t.objectStore('decks'));
+      const t = db.transaction(store, mode);
+      const req = fn(t.objectStore(store));
       t.oncomplete = () => res(req?.result);
       t.onerror = () => rej(t.error);
     });
   };
-  return {
-    all: () => tx('readonly', (s) => s.getAll()),
-    get: (id) => tx('readonly', (s) => s.get(id)),
-    put: (deck) => tx('readwrite', (s) => s.put(deck)),
-    del: (id) => tx('readwrite', (s) => s.delete(id)),
-  };
+  const api = (store) => ({
+    all: () => tx(store, 'readonly', (s) => s.getAll()),
+    get: (id) => tx(store, 'readonly', (s) => s.get(id)),
+    put: (v) => tx(store, 'readwrite', (s) => s.put(v)),
+    del: (id) => tx(store, 'readwrite', (s) => s.delete(id)),
+  });
+  return { local: api('decks'), cache: api('files') };
 })();
+
+// The presenter uses the admin's sign-in (shared with the admin console in this browser).
+const token = () => LL.getToken('admin');
+class AuthError extends Error {}
+async function srv(path, { method = 'GET', body, raw } = {}) {
+  const res = await fetch(path, {
+    method,
+    headers: { Authorization: 'Bearer ' + token(), ...(raw ? { 'Content-Type': 'application/octet-stream' } : body ? { 'Content-Type': 'application/json' } : {}) },
+    body: raw || (body ? JSON.stringify(body) : undefined),
+  });
+  if (res.status === 401 || res.status === 403) throw new AuthError('Sign in as admin to use the presenter');
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Request failed');
+  return res.headers.get('content-type')?.includes('json') ? res.json() : res.arrayBuffer();
+}
+// Run tasks a few at a time.
+async function pool(tasks, n = 3) {
+  let i = 0;
+  await Promise.all(Array.from({ length: Math.min(n, tasks.length) }, async () => { while (i < tasks.length) await tasks[i++](); }));
+}
 
 const loadScript = (src) => new Promise((res, rej) => {
   if (document.querySelector(`script[src="${src}"]`)) return res();
@@ -335,36 +378,95 @@ function openDeck(rec) {
 }
 
 // ---------- library ----------
+const L = { server: null, chunkSize: 0, offline: false, sig: '', authed: !!token() };
+const keyOf = (d) => (d.sid ? 's' + d.sid : 'l' + d.id);
+const fmtDate = (t) => new Date(t).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+
+async function refresh(force) {
+  if (!token()) { L.authed = false; return renderLibrary(); }
+  try {
+    const r = await srv('/api/decks');
+    L.server = r.decks; L.chunkSize = r.chunkSize; L.offline = false; L.authed = true;
+  } catch (e) {
+    if (e instanceof AuthError) { LL.setToken(null, 'admin'); L.authed = false; }
+    else L.offline = true;
+  }
+  const sig = JSON.stringify([L.authed, L.offline, (L.server || []).map((d) => [d.id, d.updated_at])]);
+  if (force || sig !== L.sig) { L.sig = sig; renderLibrary(); }
+}
+
 async function renderLibrary() {
-  let decks = [];
-  try { decks = await DB.all(); } catch { $('decks').innerHTML = '<div class="empty">This browser is blocking storage, so decks can\'t be saved here. Try a normal (non-private) window.</div>'; return; }
-  decks.sort((a, b) => b.added - a.added);
-  if (!decks.length) { $('decks').innerHTML = '<div class="empty"><i class="ti ti-presentation-off" style="font-size:22px; display:block; margin-bottom:6px;"></i>No decks yet. Upload one above to get started.</div>'; return; }
+  $('who').innerHTML = L.authed ? `<button class="linkish" onclick="signOut()">Sign out</button>` : '';
+  if (!L.authed) {
+    $('drop').classList.add('hidden'); $('note').classList.add('hidden'); $('decks-h').classList.add('hidden');
+    $('decks').innerHTML = `<form class="signin" id="signin">
+      <b>Sign in as admin</b><p>Decks are shared across your devices, so the presenter needs the admin account.</p>
+      <input class="input" name="email" type="email" placeholder="Admin email" required autocomplete="username">
+      <input class="input" name="password" type="password" placeholder="Password" required autocomplete="current-password">
+      <button class="btn primary block" type="submit">Sign in</button><p class="err" id="signin-err"></p></form>`;
+    $('signin').onsubmit = signIn;
+    return;
+  }
+  $('drop').classList.remove('hidden'); $('note').classList.remove('hidden'); $('decks-h').classList.remove('hidden');
+  let cached = [], local = [];
+  try { [cached, local] = await Promise.all([DB.cache.all(), DB.local.all()]); } catch {}
+  const have = new Map(cached.map((c) => [c.sid, c]));
+  // Offline: show what this device already has.
+  const shared = L.server ? L.server.map((d) => ({ ...d, sid: d.id, ready: have.get(d.id)?.updated_at === d.updated_at }))
+    : cached.map((c) => ({ ...c.meta, sid: c.sid, ready: true }));
+  local.sort((a, b) => b.added - a.added);
   const icon = { pptx: 'ti-presentation', pdf: 'ti-file-type-pdf', image: 'ti-photo' };
-  $('decks').innerHTML = `<div class="decks">${decks.map((d, k) => `
+  const card = (d, k) => `
     <div class="deck" style="animation-delay:${k * 40}ms">
-      <div class="cover" onclick="present(${d.id})">
+      <div class="cover" onclick="present('${keyOf(d)}')">
         <span class="kind">${d.kind === 'image' ? 'IMAGES' : d.kind.toUpperCase()}</span>
         ${d.cover ? `<img src="${d.cover}" alt="">` : `<div class="ph"><i class="ti ${icon[d.kind]}"></i><b>${esc(d.name)}</b></div>`}
         <div class="play"><span><i class="ti ti-player-play-filled"></i></span></div>
       </div>
       <div class="info">
         <div><div class="nm">${esc(d.name)}</div>
-          <div class="sub">${d.slides ? `${units(d.kind, d.slides)} · ` : ''}${fmtSize(d.size)} · ${esc(new Date(d.added).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }))}</div></div>
+          <div class="sub">${units(d.kind, d.slides)} · ${fmtSize(d.size)} · ${esc(fmtDate(d.created_at || d.added))}</div>
+          ${d.sid ? `<div class="sync ${d.ready ? 'ok' : ''}"><i class="ti ${d.ready ? 'ti-circle-check' : 'ti-cloud-download'}"></i>${d.ready ? 'On all devices · saved here' : 'On all devices · downloads when opened'}</div>`
+            : '<div class="sync warn"><i class="ti ti-device-mobile"></i>Only on this device</div>'}</div>
         <div class="acts">
-          <button class="btn primary small" onclick="present(${d.id})"><i class="ti ti-player-play"></i>Present</button>
-          <button class="btn ghost small" onclick="removeDeck(${d.id}, this)" title="Delete deck" aria-label="Delete deck"><i class="ti ti-trash"></i></button>
+          <button class="btn primary small" onclick="present('${keyOf(d)}')"><i class="ti ti-player-play"></i>Present</button>
+          ${d.sid ? '' : `<button class="btn ghost small" onclick="pushLocal(${d.id}, this)" title="Upload so every device has it"><i class="ti ti-cloud-upload"></i>Sync</button>`}
+          ${L.offline && d.sid ? '' : `<button class="btn ghost small" onclick="removeDeck('${keyOf(d)}', this)" title="Delete deck" aria-label="Delete deck"><i class="ti ti-trash"></i></button>`}
         </div>
       </div>
-    </div>`).join('')}</div>`;
+    </div>`;
+  const all = [...shared, ...local];
+  $('decks').innerHTML = (L.offline ? '<div class="offline"><i class="ti ti-wifi-off"></i>Offline. Showing decks saved on this device; uploads and changes need a connection.</div>' : '')
+    + (all.length ? `<div class="decks">${all.map(card).join('')}</div>`
+      : '<div class="empty"><i class="ti ti-presentation-off" style="font-size:22px; display:block; margin-bottom:6px;"></i>No decks yet. Upload one above and it appears on all your devices.</div>');
 }
 
-async function removeDeck(id, btn) {
-  const d = await DB.get(id);
-  if (!d || !confirm(`Delete "${d.name}" from this browser?`)) return;
-  await DB.del(id);
-  toast('Deck deleted');
-  renderLibrary();
+async function signIn(e) {
+  e.preventDefault();
+  const f = e.target, err = $('signin-err'), btn = f.querySelector('button');
+  err.textContent = ''; btn.disabled = true;
+  try {
+    const r = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: f.email.value, password: f.password.value }) });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Sign in failed');
+    if (data.user.role !== 'admin') throw new Error('That account is not an admin');
+    LL.setToken(data.token, 'admin');
+    await refresh(true);
+  } catch (ex) { err.textContent = ex.message; btn.disabled = false; }
+}
+function signOut() { LL.setToken(null, 'admin'); L.authed = false; L.server = null; renderLibrary(); }
+
+async function removeDeck(key, btn) {
+  const sid = key[0] === 's' ? Number(key.slice(1)) : null;
+  const d = sid ? (L.server || []).find((x) => x.id === sid) : await DB.local.get(Number(key.slice(1)));
+  if (!d || !confirm(sid ? `Delete "${d.name}" from all devices?` : `Delete "${d.name}" from this device?`)) return;
+  btn.disabled = true;
+  try {
+    if (sid) { await srv('/api/decks/' + sid, { method: 'DELETE' }); await DB.cache.del(sid).catch(() => {}); }
+    else await DB.local.del(d.id);
+    toast('Deck deleted');
+  } catch (e) { toast(e.message, true); }
+  refresh(true);
 }
 
 // A small first-slide image for the library card (PDF and images; PPTX keeps the styled placeholder).
@@ -382,14 +484,48 @@ async function makeCover(deck, kind) {
     const ctx = c.getContext('2d');
     ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
     ctx.drawImage(src, 0, 0, c.width, c.height);
-    return c.toDataURL('image/jpeg', 0.82);
+    return c.toDataURL('image/jpeg', 0.8);
   } catch { return null; }
   finally { el.remove(); }
+}
+
+const status = (t, sub) => { $('drop-t').textContent = t; $('drop-s').textContent = sub; };
+
+// Send a checked deck to the server in chunks, then keep its files in this browser's cache.
+async function upload(rec) {
+  const d = await srv('/api/decks', { method: 'POST', body: {
+    name: rec.name, kind: rec.kind, slides: rec.slides, cover: rec.cover,
+    files: rec.files.map((f) => ({ name: f.name, type: f.type, size: f.data.size })),
+  } });
+  const size = d.chunkSize;
+  const tasks = [];
+  let sent = 0;
+  d.files.forEach((f, fi) => {
+    for (let n = 0; n < f.chunks; n++) {
+      tasks.push(async () => {
+        const part = rec.files[fi].data.slice(n * size, (n + 1) * size);
+        await srv(`/api/decks/${d.id}/files/${fi}/chunks/${n}`, { method: 'PUT', raw: part });
+        sent += part.size;
+        status(`Uploading ${rec.name}… ${Math.round((sent / d.size) * 100)}%`, 'It appears on your other devices as soon as this finishes.');
+      });
+    }
+  });
+  try {
+    await pool(tasks);
+    const done = await srv(`/api/decks/${d.id}/complete`, { method: 'POST' });
+    await DB.cache.put({ sid: done.id, updated_at: done.updated_at, meta: done, files: rec.files }).catch(() => {});
+    return done;
+  } catch (e) {
+    srv('/api/decks/' + d.id, { method: 'DELETE' }).catch(() => {});
+    throw e;
+  }
 }
 
 async function addFiles(list) {
   const files = [...list];
   if (!files.length) return;
+  if (!L.authed) return toast('Sign in as admin first', true);
+  if (L.offline) return toast('You are offline. Connect to upload so every device gets the deck.', true);
   const kinds = files.map(kindOf);
   if (kinds.includes('ppt')) return toast('Old .ppt files can\'t be shown in a browser. Save it as .pptx or PDF first.', true);
   if (kinds.includes(null)) return toast('Upload a .pptx, .pdf or image files', true);
@@ -400,30 +536,70 @@ async function addFiles(list) {
     images.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
     recs.push({ name: images.length === 1 ? baseName(images[0].name) : `${images.length} images`, kind: 'image', files: images.map((f) => ({ name: f.name, type: f.type, data: f })), size: images.reduce((s, f) => s + f.size, 0) });
   }
-  const drop = $('drop');
-  drop.classList.add('busy');
+  $('drop').classList.add('busy');
   try {
     for (const rec of recs) {
-      $('drop-t').textContent = `Reading ${rec.name}…`;
-      $('drop-s').textContent = 'Checking the slides render';
-      const deck = await openDeck(rec); // validates the file before we keep it
+      status(`Reading ${rec.name}…`, 'Checking the slides render');
+      const deck = await openDeck(rec); // validates the file before it is uploaded
       rec.slides = deck.count;
       rec.cover = await makeCover(deck, rec.kind);
       deck.destroy();
-      rec.added = Date.now();
-      await DB.put(rec);
-      toast(`${rec.name} added · ${units(rec.kind, rec.slides)}`);
+      await upload(rec);
+      toast(`${rec.name} uploaded · ${units(rec.kind, rec.slides)} · on all your devices`);
     }
   } catch (e) {
     toast(e.message && !/^\w+Error$/.test(e.name || '') ? e.message : 'Could not read that file', true);
     console.error(e);
   } finally {
-    drop.classList.remove('busy');
-    $('drop-t').textContent = 'Drop a PowerPoint or PDF here';
-    $('drop-s').textContent = 'PDFs are shown page by page: each page becomes one slide.';
+    $('drop').classList.remove('busy');
+    status('Drop a PowerPoint or PDF here', 'PDFs are shown page by page: each page becomes one slide.');
     ['file', 'file-pptx', 'file-pdf'].forEach((id) => { $(id).value = ''; });
-    renderLibrary();
+    refresh(true);
   }
+}
+
+// Decks added before syncing existed: upload one so every device has it.
+async function pushLocal(id, btn) {
+  const rec = await DB.local.get(id);
+  if (!rec) return;
+  btn.disabled = true;
+  $('drop').classList.add('busy');
+  try {
+    await upload(rec);
+    await DB.local.del(id);
+    toast(`${rec.name} is now on all your devices`);
+  } catch (e) { toast(e.message, true); btn.disabled = false; }
+  finally { $('drop').classList.remove('busy'); status('Drop a PowerPoint or PDF here', 'PDFs are shown page by page: each page becomes one slide.'); refresh(true); }
+}
+
+// Files for a deck: from this browser's cache, or downloaded (and cached) from the server.
+async function filesFor(key, onProgress) {
+  if (key[0] === 'l') {
+    const rec = await DB.local.get(Number(key.slice(1)));
+    if (!rec) throw new Error('Deck not found');
+    return rec;
+  }
+  const sid = Number(key.slice(1));
+  const meta = (L.server || []).find((d) => d.id === sid);
+  const hit = await DB.cache.get(sid).catch(() => null);
+  if (hit && (!meta || hit.updated_at === meta.updated_at)) return { ...hit.meta, files: hit.files };
+  if (!meta) throw new Error('Deck not found. It may have been deleted.');
+  const size = L.chunkSize;
+  let got = 0;
+  const parts = meta.files.map((f) => new Array(f.chunks));
+  const tasks = [];
+  meta.files.forEach((f, fi) => {
+    for (let n = 0; n < f.chunks; n++) tasks.push(async () => {
+      const buf = await srv(`/api/decks/${sid}/files/${fi}/chunks/${n}`);
+      parts[fi][n] = buf;
+      got += buf.byteLength;
+      onProgress?.(Math.min(1, got / meta.size));
+    });
+  });
+  await pool(tasks, 4);
+  const files = meta.files.map((f, fi) => ({ name: f.name, type: f.type, data: new Blob(parts[fi], { type: f.type }) }));
+  await DB.cache.put({ sid, updated_at: meta.updated_at, meta, files }).catch(() => {});
+  return { ...meta, files };
 }
 
 ['file', 'file-pptx', 'file-pdf'].forEach((id) => $(id).addEventListener('change', (e) => addFiles(e.target.files)));
@@ -456,20 +632,20 @@ function place(el) {
   return s;
 }
 
-async function present(id) {
-  const rec = await DB.get(id);
-  if (!rec) return;
+async function present(key) {
   show.classList.add('on');
-  stage.innerHTML = '<div class="slide in" style="width:160px;height:90px;transform:translate(-50%,-50%);background:none;box-shadow:none"><div class="spin"></div></div>';
+  stage.innerHTML = '<div class="loading"><div class="spin"></div><span id="dl"></span></div>';
   enterFullscreen();
+  let rec;
   try {
+    rec = await filesFor(key, (k) => { const el = $('dl'); if (el) el.textContent = `Downloading ${Math.round(k * 100)}%`; });
+    if ($('dl')) $('dl').textContent = '';
     P.deck = await openDeck(rec);
   } catch (e) {
     close();
     return toast('Could not open this deck: ' + e.message, true);
   }
   P.rec = rec;
-  if (rec.slides !== P.deck.count) { rec.slides = P.deck.count; DB.put(rec).catch(() => {}); }
   $('show-title').textContent = rec.name;
   stage.innerHTML = '';
   P.cur = null;
@@ -544,7 +720,7 @@ function close() {
   P.deck = null; P.cur = null; P.i = 0;
   stage.innerHTML = '';
   $('thumbs').innerHTML = '';
-  renderLibrary();
+  refresh(true);
 }
 
 function enterFullscreen() {
@@ -661,7 +837,11 @@ window.addEventListener('resize', () => {
   }, 120);
 });
 
-renderLibrary();
+refresh(true);
+// Pick up decks added or deleted on other devices.
+setInterval(() => { if (!document.hidden && !P.deck) refresh(); }, 8000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && !P.deck) refresh(); });
+window.addEventListener('online', () => refresh());
 </script>
 </body>
 </html>

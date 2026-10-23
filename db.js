@@ -167,6 +167,28 @@ CREATE TABLE IF NOT EXISTS issues (
   resolved_at   TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_issues_order ON issues(order_id);
+-- Presentation decks shared across devices (the hidden /present page). Files are stored in
+-- chunks small enough for one serverless request each.
+CREATE TABLE IF NOT EXISTS decks (
+  id         SERIAL PRIMARY KEY,
+  name       TEXT NOT NULL,
+  kind       TEXT NOT NULL CHECK (kind IN ('pptx','pdf','image')),
+  files      TEXT NOT NULL,
+  size       BIGINT NOT NULL,
+  slides     INTEGER NOT NULL,
+  cover      TEXT,
+  complete   INTEGER NOT NULL DEFAULT 0,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS deck_chunks (
+  deck_id  INTEGER NOT NULL REFERENCES decks(id) ON DELETE CASCADE,
+  file_idx INTEGER NOT NULL,
+  idx      INTEGER NOT NULL,
+  data     BYTEA NOT NULL,
+  PRIMARY KEY (deck_id, file_idx, idx)
+);
 `;
 
 // Idempotent upgrades for databases created before delivery partners existed.

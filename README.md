@@ -100,7 +100,12 @@ logo five times quickly, or open `/present` directly.
   must be saved as .pptx or PDF first.
 - PPTX slides are drawn in the browser ([pptx-preview](https://www.npmjs.com/package/pptx-preview)), so animations,
   video and some fonts can differ. Exporting to PDF from PowerPoint gives an exact copy ([PDF.js](https://mozilla.github.io/pdf.js/)).
-- Decks are saved in the browser (IndexedDB) on that device only; nothing is uploaded to the server.
+- Decks are shared across devices: upload on a phone and it appears on every other device with `/present` open
+  within about 8 seconds, without reloading. Deleting removes it everywhere.
+- The presenter needs the **admin** sign-in (the same account as the admin console), for uploading and for viewing.
+- Files are stored in Postgres (`decks` and `deck_chunks` tables) in 3 MB pieces, because Vercel functions cap a
+  request or response at about 4.5 MB. A deck can be up to 80 MB. Each browser keeps the decks it has opened
+  (IndexedDB), so they reopen instantly and can be presented offline.
 - Keys: `→`/`Space` next, `←` previous, `F` full screen, `G` all slides, `B` black screen, a number then `Enter`
   jumps to that slide, `Esc` exits. Swipe works on touch screens, and clicking the left or right half of the slide steps back or forward.
 
